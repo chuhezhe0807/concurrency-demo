@@ -42,3 +42,17 @@
 - demo/demo123 连库统计：t_user=1000, t_product=200, t_order=30000, t_logistics=30000。
 - 四表 JOIN 抽样返回正确关联数据(order_no/username/product/carrier/amount)。
 - 应用侧查询验证待 US-005(列表接口)落地;连接性已由 demo 用户连库证明。
+
+## US-002 补记 [2026-06-04]
+- RabbitMQ 镜像(rabbitmq:3.13-management)已拉取，docker compose up -d rabbitmq 启动并 healthy。三依赖(mysql/redis/rabbitmq)现全部 Up。
+
+## US-004 MyBatis-Plus 实体与 Mapper [2026-06-04] PASS
+做了什么：
+- 新增实体 com.chuhezhe.entity：User/Product/Order/Logistics，@TableName 映射 t_* 表，deleted 字段加 @TableLogic 逻辑删除，时间字段靠 map-underscore-to-camel-case 自动映射。
+- 新增 Mapper com.chuhezhe.mapper：UserMapper/ProductMapper/OrderMapper/LogisticsMapper，均继承 BaseMapper。
+- 新增 MybatisPlusConfig：注册 MybatisPlusInterceptor + PaginationInnerInterceptor(MySQL) 分页插件。
+- 启动类加 @MapperScan("com.chuhezhe.mapper")。
+改动文件：entity/*.java(4 新增)、mapper/*.java(4 新增)、config/MybatisPlusConfig.java(新增)、ConcurrencyDemoApplication.java(加 @MapperScan)、test/.../MapperQueryTest.java(新增)
+如何验证：
+- mvn compile 通过，生成 entity/mapper class。
+- mvn test -Dtest=MapperQueryTest 通过(2 run,0 fail)：selectCount 校验 user/product/order/logistics = 1000/200/30000/30000；selectById(1) 得 user_1；selectList 取到 30000 订单且 orderNo 非空。

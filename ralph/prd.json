@@ -59,8 +59,8 @@
         "Maven build 编译通过"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "实体 User/Product/Order/Logistics(@TableName + @TableLogic deleted)、四个 BaseMapper、MybatisPlusConfig(分页插件)、启动类 @MapperScan。mvn compile 通过；MapperQueryTest 2 用例通过：selectCount=1000/200/30000/30000、selectById/selectList 取到预置数据。"
     },
     {
       "id": "US-005",
