@@ -44,8 +44,8 @@
         "Maven build 编译通过"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "docker/mysql/init/01-schema-and-seed.sql 建 4 表(带 deleted 逻辑删除列)并用数字表交叉连接造数：user 1000/product 200/order 30000/logistics 30000。docker-compose 挂载到 /docker-entrypoint-initdb.d 自动执行。修复 TEMPORARY 表 1137 报错(改普通表)。重建卷后 mysql healthy，行数与 4 表 JOIN 抽样均验证通过。应用侧查询验证留待 US-005。"
     },
     {
       "id": "US-004",

@@ -29,3 +29,16 @@
 - docker compose up -d mysql redis 成功，两容器 Up；mysql healthy。
 - docker exec redis redis-cli ping -> PONG。
 - docker exec mysql 校验：SHOW DATABASES LIKE 'concurrency_demo' 命中；demo/demo123 能连库。
+
+## US-003 初始化 SQL：建表与测试数据 [2026-06-04] PASS
+做了什么：
+- 新增 docker/mysql/init/01-schema-and-seed.sql：建 t_user/t_product/t_order/t_logistics 四表(均带 deleted 逻辑删除列以匹配 MyBatis-Plus 全局配置)，含主键与 user_id/product_id/order_id 索引、order_no 唯一键。
+- 用 0-9 数字表交叉连接(set-based)批量造数：user 1000、product 200(库存 100w 防下单耗尽)、order 30000、logistics 30000(每订单一条)。
+- docker-compose mysql 增加挂载 ./docker/mysql/init -> /docker-entrypoint-initdb.d:ro，首次初始化自动执行。
+改动文件：docker/mysql/init/01-schema-and-seed.sql(新增)、docker-compose.yml(mysql 增加 init 挂载)
+踩坑：最初用 CREATE TEMPORARY TABLE digits，报 ERROR 1137 Can't reopen table 'a'——MySQL 不允许同一查询多次引用同一 TEMPORARY 表；改为普通表 digits(用完 DROP)解决。
+如何验证：
+- docker compose down -v 重建卷后 up，mysql 变 healthy，日志显示执行 01-schema-and-seed.sql 无 ERROR。
+- demo/demo123 连库统计：t_user=1000, t_product=200, t_order=30000, t_logistics=30000。
+- 四表 JOIN 抽样返回正确关联数据(order_no/username/product/carrier/amount)。
+- 应用侧查询验证待 US-005(列表接口)落地;连接性已由 demo 用户连库证明。
