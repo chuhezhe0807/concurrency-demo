@@ -67,3 +67,16 @@
 - mvn compile 通过；spring-boot:run 启动成功。
 - curl /orders?pageNo=1&pageSize=3 返回带 userName/productName/carrier/trackingNo 的完整聚合数据。
 - pageSize=20 返回 20 条，首条 userName/productName/carrier 均非空。
+
+## US-006 下单接口（全同步逻辑）[2026-06-04] PASS
+做了什么：
+- 新增 dto/CreateOrderRequest(userId/productId/quantity)、dto/OrderResult(orderId/orderNo/elapsedMs)。
+- 新增非核心服务：SmsService(sleep 500ms)、EmailService(sleep 300ms)、PointsService(再查一次 DB + sleep 100ms)，均打日志模拟。
+- OrderService.placeOrder(@Transactional)：核心1 扣库存(LambdaUpdateWrapper setSql stock=stock-qty + ge 库存判断, updated=0 抛异常)、核心2 创建订单(snowflake id, 生成 orderNo)、随后同步调用 sms/email/points。
+- OrderController 增加 POST /orders。
+改动文件：dto/CreateOrderRequest.java、dto/OrderResult.java、service/SmsService.java、service/EmailService.java、service/PointsService.java（新增）、service/OrderService.java、controller/OrderController.java（修改）
+如何验证：
+- mvn compile 通过；spring-boot:run 启动成功。
+- POST /orders {userId:1,productId:5,quantity:3} 返回 orderId(snowflake)+orderNo，elapsedMs=975(≈500+300+100+DB，体现同步非核心拖慢响应)。
+- 商品库存 1000000 -> 999997，精确扣减 3。
+- 日志依次出现 [SMS]/[EMAIL]/[POINTS]，同一 nio-8080-exec-1 线程串行执行。

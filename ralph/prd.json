@@ -87,8 +87,8 @@
         "Maven build 编译通过"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "POST /orders -> OrderService.placeOrder(@Transactional)：核心扣库存(ge 库存判断)+创建订单(snowflake)，非核心 sms(500ms)/email(300ms)/points(查DB+100ms) 全同步。curl 验证：库存 1000000->999997 精确扣 3，elapsedMs=975 体现同步拖慢，日志同线程串行出现 [SMS]/[EMAIL]/[POINTS]。"
     },
     {
       "id": "US-007",
