@@ -14,3 +14,18 @@
 - mvn -DskipTests compile 通过，生成 target/classes/com/chuhezhe/ConcurrencyDemoApplication.class。
 - mvn spring-boot:run 成功启动，日志输出 "Tomcat started on port 8080" 与 "Started ConcurrencyDemoApplication"，无需外部中间件即可启动。
 
+
+## US-002 docker-compose 启动 MySQL/Redis/RabbitMQ [2026-06-04] PASS（RabbitMQ 待拉取）
+做了什么：
+- 新增 docker-compose.yml，定义 mysql / redis / rabbitmq 三个服务，含健康检查与命名数据卷，文件头注明版本/端口/账号。
+- MySQL：库 concurrency_demo、用户 demo/demo123、root/root123，utf8mb4。
+- Redis、RabbitMQ(guest/guest, 管理界面 15672)。
+改动文件：docker-compose.yml(新增)、src/main/resources/application.yml(redis 端口改为 6380)
+环境实况与取舍：
+- docker.io registry 当前不可达，无法拉取 mysql:8.4/redis:7.4/rabbitmq:3.13；本机已缓存 mysql:8.0、redis:7，故镜像改用这两个 tag。
+- 宿主机 6379 被其他项目(sql-agent-redis-1)占用，本项目 Redis 映射到宿主机 6380（容器内仍 6379），application.yml 同步改为 6380。
+- RabbitMQ 镜像无缓存且无法拉取，暂未启动；它只在 US-015(MQ) 及微服务阶段才需要，待网络可用时 docker compose pull rabbitmq 即可。
+如何验证：
+- docker compose up -d mysql redis 成功，两容器 Up；mysql healthy。
+- docker exec redis redis-cli ping -> PONG。
+- docker exec mysql 校验：SHOW DATABASES LIKE 'concurrency_demo' 命中；demo/demo123 能连库。

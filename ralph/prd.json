@@ -29,8 +29,8 @@
         "文档说明各服务连接方式"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "docker-compose.yml 定义 mysql/redis/rabbitmq(含健康检查、命名卷、连接信息注释)。受 docker.io 不可达限制，镜像改用本机已缓存的 mysql:8.0、redis:7；宿主机 6379 被占用，Redis 映射到 6380(application.yml 同步)。mysql+redis 已 up 并验证(mysql healthy、redis PONG、demo 用户可连库)。RabbitMQ 无缓存暂未拉取，US-015 前不影响。"
     },
     {
       "id": "US-003",

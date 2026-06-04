@@ -23,7 +23,7 @@ spring:
   data:
     redis:
       host: localhost
-      port: 6379
+      port: 6380   # docker-compose 映射的宿主机端口（容器内仍是 6379）
 
   rabbitmq:
     host: localhost

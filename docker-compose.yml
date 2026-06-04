@@ -1,0 +1,71 @@
+# 高并发演示项目第三方依赖
+# 启动：docker-compose up -d
+# 停止：docker-compose down        （加 -v 连数据卷一起删除）
+#
+# 服务与连接信息：
+#   MySQL    8.0  -> localhost:3306  库 concurrency_demo  用户 demo/demo123  (root 密码 root123)
+#   Redis    7    -> localhost:6379  无密码
+#   RabbitMQ 3.13 -> localhost:5672  (AMQP)  guest/guest
+#                    localhost:15672 (管理界面 http://localhost:15672)
+#
+# 注意：rabbitmq 仅在 MQ 阶段(US-015)及微服务阶段使用。若 docker.io 拉取受限，
+#       可先只启动数据库与缓存：docker-compose up -d mysql redis
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: concurrency-demo-mysql
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: concurrency_demo
+      MYSQL_USER: demo
+      MYSQL_PASSWORD: demo123
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot123"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: concurrency-demo-redis
+    ports:
+      # 宿主机 6379 可能被其他项目占用，这里映射到 6380（容器内仍是 6379）
+      - "6380:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: concurrency-demo-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mysql-data:
+  redis-data:
+  rabbitmq-data:
