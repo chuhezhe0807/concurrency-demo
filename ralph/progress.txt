@@ -91,3 +91,12 @@
 - mvn compile 通过；spring-boot:run 启动成功。
 - 启动日志输出 "优化开关状态 -> batchQuery=false, hikariTuning=false, cache=false, async=false, mq=false"，证明绑定生效且基线全关。
 - grep application.yml 确认 Tomcat 200 / Hikari 10 / 30s 超时基线值就位。
+
+## US-008 JMeter 基线压测脚本与指标记录 [2026-06-04] PASS
+做了什么：
+- 新增 jmeter/order_list_test.jmx：200 线程(可 -Jthreads 覆盖) × 5 循环压 GET /orders?pageNo=1&pageSize=20，参数化 host/port/threads/loops，ramp-up 5s。
+- 新增 jmeter/BENCHMARK.md：运行命令、如何读报告、基线指标表、本机环境 vs 原文数字的诚实说明。
+- .gitignore 忽略 jmeter 产物(result.jtl/report/jmeter.log)。
+实测基线(本机 docker MySQL，未优化全开关 false)：1000 请求，吞吐 ~199 req/s，平均 28.7ms，TP90/95/99=42/47/58ms，错误率 0%。
+重要发现(已写入 BENCHMARK.md)：本机单次查询亚毫秒，61 次 N+1 累计也只 ~28ms，无法复现原文 4200ms/38rps/12%。记录的是真实测量值，未套用原文数字。影响：本机 N+1 优化绝对收益不如原文夸张，放大对比可在 Mapper 加人为延迟/增大 threads·loops·pageSize/关注相对提升。
+如何验证：jmeter -n -t ... -e -o report/ 跑完 summary=1000 in 5s 0 错误，statistics.json Total 取得指标。

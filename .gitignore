@@ -37,3 +37,8 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+### JMeter 生成产物 ###
+jmeter/result.jtl
+jmeter/report/
+jmeter.log
