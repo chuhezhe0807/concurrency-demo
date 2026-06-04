@@ -73,8 +73,8 @@
         "Maven build 编译通过"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "OrderVO 聚合视图 + OrderService.listOrders(分页 20/页) + fillOrderDetails 刻意 N+1(每订单 selectById 查 user/product、按 orderId 查 logistics, 61 次查询) + OrderController GET /orders。方法名 fillOrderDetails 沿用原文便于 US-009 Arthas trace。curl 验证返回完整聚合数据(userName/productName/carrier/trackingNo)，pageSize=20 返回 20 条。"
     },
     {
       "id": "US-006",

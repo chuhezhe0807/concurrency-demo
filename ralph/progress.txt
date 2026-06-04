@@ -56,3 +56,14 @@
 如何验证：
 - mvn compile 通过，生成 entity/mapper class。
 - mvn test -Dtest=MapperQueryTest 通过(2 run,0 fail)：selectCount 校验 user/product/order/logistics = 1000/200/30000/30000；selectById(1) 得 user_1；selectList 取到 30000 订单且 orderNo 非空。
+
+## US-005 订单列表接口（刻意 N+1）[2026-06-04] PASS
+做了什么：
+- 新增 vo/OrderVO：订单+用户+商品+物流的聚合视图对象。
+- 新增 service/OrderService：listOrders(pageNo,pageSize) 用 selectPage 分页(默认 20/页)，fillOrderDetails 对每条订单分别 selectById 查 user/product + 按 orderId 查 logistics —— 刻意 N+1（20 条 = 1+20*3 = 61 次查询）。方法名沿用原文 fillOrderDetails，便于后续 US-009 Arthas trace 演示。
+- 新增 controller/OrderController：GET /orders?pageNo&pageSize。
+改动文件：vo/OrderVO.java、service/OrderService.java、controller/OrderController.java（均新增）
+如何验证：
+- mvn compile 通过；spring-boot:run 启动成功。
+- curl /orders?pageNo=1&pageSize=3 返回带 userName/productName/carrier/trackingNo 的完整聚合数据。
+- pageSize=20 返回 20 条，首条 userName/productName/carrier 均非空。
