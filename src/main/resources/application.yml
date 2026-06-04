@@ -1,0 +1,50 @@
+server:
+  port: 8080
+  tomcat:
+    threads:
+      max: 200            # 基线未优化：Tomcat 默认 200 线程
+
+spring:
+  application:
+    name: concurrency-demo
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/concurrency_demo?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: demo
+    password: demo123
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10       # 基线未优化：HikariCP 默认 10 连接
+      minimum-idle: 10
+      connection-timeout: 30000   # 基线未优化：30s 超时
+      # 启动时不因数据库未就绪而失败（MySQL 由 docker-compose 在 US-002/US-003 提供）
+      initialization-fail-timeout: 0
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# 优化开关脚手架（基线全部关闭，后续 story 逐个启用）
+demo:
+  optimize:
+    batch-query: false
+    hikari-tuning: false
+    cache: false
+    async: false
+    mq: false

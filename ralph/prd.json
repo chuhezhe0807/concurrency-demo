@@ -1,0 +1,335 @@
+{
+  "project": "concurrency-demo",
+  "branchName": "main",
+  "description": "Spring Boot 高并发处理演示项目 - 以订单系统为例，通过 feature flag 逐步演示从慢到快的优化（N+1、HikariCP、Redis、@Async、RabbitMQ），配合 JMeter 压测与 Arthas 诊断；阶段二演进为微服务（Nacos + Gateway），对热点服务横向扩容并对比 Seata 与 RabbitMQ 最终一致性两种分布式事务方案。所有第三方依赖通过 docker-compose 启动，使用真实 MySQL 与预置测试数据。",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "搭建 Spring Boot 项目骨架与依赖",
+      "description": "作为开发者，我需要一个可启动的 Spring Boot 项目骨架，引入高并发演示所需的依赖。",
+      "acceptanceCriteria": [
+        "pom.xml 引入 Spring Boot parent（Java 21），含 spring-boot-starter-web、mybatis-plus-boot-starter、mysql-connector-j、spring-boot-starter-data-redis、spring-boot-starter-amqp、spring-boot-starter-cache",
+        "存在带 @SpringBootApplication 的启动类",
+        "application.yml 含 MySQL/Redis/RabbitMQ 连接占位配置",
+        "Maven build 编译通过（mvn compile）",
+        "应用能启动（mvn spring-boot:run 不报错退出）"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Spring Boot 3.3.4 + Java 21；依赖与启动类就位，application.yml 含基线配置与 demo.optimize 开关脚手架。mvn compile 通过，spring-boot:run 成功启动(无需外部中间件)。本机经 brew 安装 maven 3.9.16，构建用 JAVA_HOME=openjdk@21。"
+    },
+    {
+      "id": "US-002",
+      "title": "docker-compose 启动 MySQL/Redis/RabbitMQ",
+      "description": "作为学习者，我希望用 docker-compose 一键启动所有第三方依赖。",
+      "acceptanceCriteria": [
+        "提供 docker-compose.yml，包含 MySQL、Redis、RabbitMQ（含 management 管理界面）三个服务",
+        "明确写出各服务版本、端口、账号密码",
+        "docker-compose up -d 能成功启动全部容器",
+        "文档说明各服务连接方式"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "初始化 SQL：建表与测试数据",
+      "description": "作为学习者，我需要真实 MySQL 中预置测试表与测试数据。",
+      "acceptanceCriteria": [
+        "提供初始化 SQL，建 order / user / product / logistics 四张表",
+        "SQL 造适中规模的测试数据（用于连接争用与压测体感，无需靠数据量复现 N+1）",
+        "docker-compose 启动 MySQL 时自动执行初始化 SQL（挂载到 /docker-entrypoint-initdb.d）",
+        "应用启动后能连上 MySQL 并查到预置数据",
+        "Maven build 编译通过"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "MyBatis-Plus 实体与 Mapper",
+      "description": "作为开发者，我需要四张表对应的实体与 Mapper 以便后续查询。",
+      "acceptanceCriteria": [
+        "为 order/user/product/logistics 创建实体类（MyBatis-Plus 注解）",
+        "创建对应的 Mapper 接口（继承 BaseMapper）",
+        "配置 MyBatis-Plus（mapper 扫描、分页插件）",
+        "能通过 Mapper 查询到预置数据",
+        "Maven build 编译通过"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "订单列表接口（刻意 N+1）",
+      "description": "作为学习者，我需要一个故意写成 N+1 的订单列表接口作为优化起点。",
+      "acceptanceCriteria": [
+        "提供 GET /orders 分页接口（默认每页 20 条）",
+        "填充订单详情时刻意 for 循环逐条查询 user/product/logistics（制造 N+1）",
+        "curl GET /orders 返回带用户/商品/物流信息的订单列表",
+        "Maven build 编译通过"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "下单接口（全同步逻辑）",
+      "description": "作为学习者，我需要一个把核心与非核心逻辑全放在同步方法里的下单接口。",
+      "acceptanceCriteria": [
+        "提供 POST /orders：扣库存 + 创建订单（核心），发短信 + 发邮件 + 加积分（非核心）",
+        "短信/邮件用 sleep 或日志模拟耗时（如 500ms/300ms），不做真实发送",
+        "curl POST /orders 能创建订单并返回结果",
+        "Maven build 编译通过"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "基线配置与 feature flag 脚手架",
+      "description": "作为学习者，我需要默认未优化配置，以及统一的优化开关脚手架。",
+      "acceptanceCriteria": [
+        "application.yml 设 Tomcat 200 线程、HikariCP 10 连接（基线未优化）",
+        "新增 demo.optimize.* 配置开关（batch-query、hikari-tuning、cache、async、mq），默认全部 false",
+        "提供读取这些开关的配置类（@ConfigurationProperties）",
+        "Maven build 编译通过",
+        "应用以基线配置正常启动"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "JMeter 基线压测脚本与指标记录",
+      "description": "作为学习者，我需要压测脚本与基线指标来量化优化前有多慢。",
+      "acceptanceCriteria": [
+        "提供 order_list_test.jmx（200 并发请求 GET /orders）",
+        "文档写明运行命令：jmeter -n -t order_list_test.jmx -l result.jtl -e -o report/",
+        "文档提供基线指标记录表（平均响应时间、吞吐量 req/s、错误率、TP99）",
+        "文档说明如何阅读 JMeter 报告关键数字"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Arthas 诊断文档（手动演示）",
+      "description": "作为学习者，我需要学会用 Arthas 定位接口内部最慢的一步。",
+      "acceptanceCriteria": [
+        "文档说明 java -jar arthas-boot.jar 与 trace 命令用法",
+        "文档展示并解读 trace 输出，定位到 fillOrderDetails 占绝大部分耗时",
+        "文档强调“线程数不是瓶颈时调大线程数无用”的反直觉结论",
+        "仅作为手动演示步骤，不纳入自动化验证"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "N+1 优化：批量查询开关",
+      "description": "作为学习者，我希望通过开关把逐条查询切换为批量查询并看到提升。",
+      "acceptanceCriteria": [
+        "demo.optimize.batch-query=true 时用批量 IN 查询（MyBatis-Plus listByIds）+ 内存 Map 匹配；false 时保持逐条查询",
+        "61 次查询降为约 4 次",
+        "文档记录优化前后压测指标对比",
+        "Maven build 编译通过",
+        "curl GET /orders 在开关开启时返回结果正确"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "HikariCP 连接池调优开关",
+      "description": "作为学习者，我希望通过开关切换连接池配置，消除连接超时错误。",
+      "acceptanceCriteria": [
+        "demo.optimize.hikari-tuning=true 时使用 maximum-pool-size=30、minimum-idle=10、connection-timeout=3000；false 时为默认 10 连接 / 30s 超时",
+        "文档展示并解读 HikariCP 连接超时日志",
+        "文档记录优化前后错误率与 TP99 对比",
+        "文档补充连接数经验公式与 leak-detection-threshold 说明",
+        "Maven build 编译通过"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Redis 缓存热点商品查询开关",
+      "description": "作为学习者，我希望对商品查询加 Redis 缓存进一步提升吞吐。",
+      "acceptanceCriteria": [
+        "demo.optimize.cache=true 时商品查询走 @Cacheable(value=product, key=#productId)",
+        "配置 Spring Cache + Redis",
+        "文档记录加缓存后吞吐量对比",
+        "依赖 docker-compose 中的 Redis",
+        "Maven build 编译通过"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "缓存一致性演示与方案对比",
+      "description": "作为学习者，我需要看到缓存不一致问题并理解处理方案取舍。",
+      "acceptanceCriteria": [
+        "商品更新走 @CacheEvict(value=product, key=#product.id)",
+        "文档描述并发更新+查询导致回填旧值的竞态场景",
+        "文档对比延迟双删、订阅 binlog、短过期时间兜底三种方案的适用场景与局限",
+        "Maven build 编译通过"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "非核心逻辑异步化（@Async）开关",
+      "description": "作为学习者，我希望把下单的非核心逻辑异步化以缩短响应时间。",
+      "acceptanceCriteria": [
+        "demo.optimize.async=true 时下单同步只做扣库存+创建订单，其余丢入 @Async(orderExecutor) 线程池",
+        "提供自定义线程池配置（核心/最大线程、队列、拒绝策略）",
+        "文档记录下单接口响应时间对比",
+        "文档补充拒绝策略（CallerRunsPolicy vs 直接拒绝）说明",
+        "Maven build 编译通过"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "RabbitMQ 替代 @Async 开关",
+      "description": "作为学习者，当任务量大或不能丢失时，我希望用 RabbitMQ 替代 @Async。",
+      "acceptanceCriteria": [
+        "demo.optimize.mq=true 时下单后非核心任务投递到 RabbitMQ，消费者异步处理",
+        "配置队列持久化、手动 ack",
+        "文档补充消息丢失保障（publisher confirm + 持久化 + 手动 ack）与幂等性设计",
+        "依赖 docker-compose 中的 RabbitMQ",
+        "Maven build 编译通过"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "阶段一汇总对比教程文档",
+      "description": "作为学习者，我希望有一份串起全流程的对比文档。",
+      "acceptanceCriteria": [
+        "文档汇总最初 vs 最终指标（38 req/s、4200ms、12% → 500+ req/s、~80ms、0%）",
+        "每个阶段列出：开关如何打开、压测命令、对比数字、面试可展开的知识点",
+        "说明如何按阶段逐个打开开关复现整条优化曲线"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "阶段二：引入 Nacos 与 Spring Cloud Gateway",
+      "description": "作为学习者，我需要注册中心与网关作为微服务化的基础设施。",
+      "acceptanceCriteria": [
+        "docker-compose 增加 Nacos（注册+配置中心）",
+        "新增 Spring Cloud Gateway 模块，引入 Spring Cloud 依赖与版本管理",
+        "网关能启动并注册到 Nacos",
+        "Maven build 编译通过"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "阶段二：拆分商品服务为独立微服务",
+      "description": "作为学习者，我希望把商品（热点）拆为独立可部署的微服务。",
+      "acceptanceCriteria": [
+        "product-service 独立 Spring Boot 模块，独立连接 MySQL，注册到 Nacos",
+        "暴露商品查询/更新接口",
+        "经网关可路由到 product-service",
+        "Maven build 编译通过"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "阶段二：拆分订单服务并通过 Feign 调用商品服务",
+      "description": "作为学习者，我希望订单服务跨服务调用商品服务完成下单。",
+      "acceptanceCriteria": [
+        "order-service 独立模块，注册到 Nacos",
+        "通过 OpenFeign 调用 product-service 完成扣库存",
+        "经网关可完成跨服务下单流程",
+        "文档说明拆分边界与引入的新问题（网络调用、数据一致性）",
+        "Maven build 编译通过"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "阶段二：热点服务横向扩容与压测对比",
+      "description": "作为学习者，我希望对热点服务多实例部署并验证扩容效果。",
+      "acceptanceCriteria": [
+        "docker-compose 启动热点服务的多个实例",
+        "经网关/Spring Cloud LoadBalancer 负载均衡分发请求",
+        "提供 JMeter 压测对比：单实例 vs 多实例的吞吐量与响应时间",
+        "文档说明横向扩容前提（服务无状态、共享 Redis/MySQL）与瓶颈下移到数据库的现象"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "阶段二：Seata 分布式事务（强一致）",
+      "description": "作为学习者，我希望用 Seata 保证跨服务下单的强一致性。",
+      "acceptanceCriteria": [
+        "docker-compose 增加 Seata Server",
+        "跨服务下单（订单服务创建订单 + 商品服务扣库存）使用 Seata（AT 或 TCC）",
+        "演示成功提交与失败回滚两条路径",
+        "Maven build 编译通过"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "阶段二：RabbitMQ 可靠消息最终一致性",
+      "description": "作为学习者，我希望用基于 RabbitMQ 的可靠消息实现最终一致性。",
+      "acceptanceCriteria": [
+        "跨服务下单通过 RabbitMQ 可靠消息驱动（本地消息表或 publisher confirm + 持久化 + 手动 ack）",
+        "演示正常流程与补偿/重试路径",
+        "Maven build 编译通过"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "阶段二：分布式事务方案对比文档",
+      "description": "作为学习者，我希望对比 Seata 与 RabbitMQ 最终一致性两种方案。",
+      "acceptanceCriteria": [
+        "文档对比强一致（Seata）vs 最终一致（RabbitMQ）的适用场景、性能代价、复杂度",
+        "给出选型建议与各自的局限"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

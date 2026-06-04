@@ -1,0 +1,16 @@
+# Progress Log — Spring Boot 高并发处理演示项目
+# 每完成一个 user story，在下方追加一条记录：做了什么、改了哪些文件、如何验证。
+
+## US-001 搭建 Spring Boot 项目骨架与依赖 [2026-06-04] PASS
+做了什么：
+- 把 pom.xml 从纯 Maven 改为 Spring Boot 项目：继承 spring-boot-starter-parent 3.3.4，Java 21。
+- 引入依赖：starter-web、starter-cache、starter-data-redis、starter-amqp、mybatis-plus-spring-boot3-starter 3.5.7、mysql-connector-j(runtime)、starter-test(test)；加入 spring-boot-maven-plugin。
+- 删除占位的 Main.java，新增启动类 ConcurrencyDemoApplication（@SpringBootApplication）。
+- 新增 application.yml：Tomcat 200 线程 / HikariCP 10 连接(基线未优化)、MySQL/Redis/RabbitMQ 连接占位、MyBatis-Plus 配置、demo.optimize.* 优化开关脚手架(默认全 false)。
+- Hikari 设 initialization-fail-timeout: 0，使骨架在 MySQL 尚未就绪(US-002/003 才提供)时也能启动。
+改动文件：pom.xml、src/main/java/com/chuhezhe/ConcurrencyDemoApplication.java(新增)、src/main/java/com/chuhezhe/Main.java(删除)、src/main/resources/application.yml(新增)
+环境备注：本机原先无 Maven，已用 brew 安装 maven 3.9.16；构建需 JAVA_HOME=/opt/homebrew/opt/openjdk@21/...（Java 21）。
+如何验证：
+- mvn -DskipTests compile 通过，生成 target/classes/com/chuhezhe/ConcurrencyDemoApplication.class。
+- mvn spring-boot:run 成功启动，日志输出 "Tomcat started on port 8080" 与 "Started ConcurrencyDemoApplication"，无需外部中间件即可启动。
+
