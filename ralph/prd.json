@@ -102,8 +102,8 @@
         "应用以基线配置正常启动"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "OptimizeProperties(@ConfigurationProperties demo.optimize.*, 五开关默认 false) + OptimizeFlagsLogger(启动打印开关状态)。基线配置确认 Tomcat 200/Hikari 10/30s 超时。启动日志输出全 false，绑定生效。"
     },
     {
       "id": "US-008",

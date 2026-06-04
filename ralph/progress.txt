@@ -80,3 +80,14 @@
 - POST /orders {userId:1,productId:5,quantity:3} 返回 orderId(snowflake)+orderNo，elapsedMs=975(≈500+300+100+DB，体现同步非核心拖慢响应)。
 - 商品库存 1000000 -> 999997，精确扣减 3。
 - 日志依次出现 [SMS]/[EMAIL]/[POINTS]，同一 nio-8080-exec-1 线程串行执行。
+
+## US-007 基线配置与 feature flag 脚手架 [2026-06-04] PASS
+做了什么：
+- 新增 config/OptimizeProperties：@ConfigurationProperties(prefix=demo.optimize)，绑定 batchQuery/hikariTuning/cache/async/mq 五个开关(默认 false)，@Component 注册。
+- 新增 config/OptimizeFlagsLogger：监听 ApplicationReadyEvent，启动时打印开关状态，便于验证绑定。
+- 确认 application.yml 基线配置：Tomcat threads.max=200、Hikari maximum-pool-size=10/minimum-idle=10/connection-timeout=30000(US-001 已写入)。
+改动文件：config/OptimizeProperties.java、config/OptimizeFlagsLogger.java（新增）
+如何验证：
+- mvn compile 通过；spring-boot:run 启动成功。
+- 启动日志输出 "优化开关状态 -> batchQuery=false, hikariTuning=false, cache=false, async=false, mq=false"，证明绑定生效且基线全关。
+- grep application.yml 确认 Tomcat 200 / Hikari 10 / 30s 超时基线值就位。
