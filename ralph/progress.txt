@@ -112,3 +112,13 @@
 如何验证：
 - mvn compile 通过；warmup 单请求从 0.27s 升到 0.77s(61×5ms+争用)。
 - jmeter 复跑 1000 请求 summary=21.9/s avg 7978ms，statistics.json 取得 TP99 11851ms。
+
+## US-009 Arthas 诊断文档（手动演示）[2026-06-05] PASS
+做了什么：
+- 新增 docs/ARTHAS.md（纯文档，PRD 明确“仅作手动演示步骤，不纳入自动化验证”）。
+- 启动方式：覆盖官方 java -jar arthas-boot.jar，并说明本仓库根目录已下载的 as.sh 即官方 Arthas 启动脚本(v4.2.2)，二者 attach 效果等价；含 jps 查 pid、Web Console 8563、quit/stop。
+- trace 两层下钻演示：trace OrderService listOrders 显示 selectPage 仅 ~0.6%、fillOrderDetails 占 ~99%；再 trace fillOrderDetails 显示 UserMapper/ProductMapper/LogisticsMapper 各 [20 times]，1+20×3=61 次 DB 往返，定位到 N+1。附逐行解读(百分比/耗时/源码行号 #102/#103/#113-115)与 watch 看实参的提示。
+- 反直觉结论：thread -n 看到 http-nio 工作线程几乎全 TIMED_WAITING，阻塞在 SimulatedLatencyInterceptor 等 DB 返回(CPU 极低)；瓶颈是“串行 61 次往返 × 5ms + Hikari 仅 10 连接”，与线程数无关，调大线程只会让更多线程抢 10 条连接、排队更长、TP99 反升。给出正确方向 US-010(批量查询)/US-011(连接池)/US-012(缓存)。末尾附命令速查表。
+改动文件：docs/ARTHAS.md(新增)、ralph/prd.json(US-009 passes=true+notes)
+环境备注：as.sh 已由用户下载到仓库根目录(34KB, ARTHAS_SCRIPT_VERSION=4.2.2)。trace 示例数字与 US-008 实测(单请求 ~0.77s、5ms/查询)量级一致，未实跑 attach(手动演示项)。
+如何验证：本 story 不纳入自动化验证；文档自洽，命令与类/方法名(com.chuhezhe.service.OrderService.listOrders/fillOrderDetails)与源码一致，启动方式与本机已下载的 as.sh 对齐。

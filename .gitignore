@@ -42,3 +42,7 @@ build/
 jmeter/result.jtl
 jmeter/report/
 jmeter.log
+
+### Arthas 诊断工具（外部下载，不入库） ###
+arthas-boot.jar
+as.sh

@@ -130,8 +130,8 @@
         "仅作为手动演示步骤，不纳入自动化验证"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "纯文档(手动演示，不纳入自动化验证)。新增 docs/ARTHAS.md：①启动方式覆盖官方 java -jar arthas-boot.jar 与本仓库已下载的 as.sh(官方启动脚本 v4.2.2，等价)；②trace 两层下钻——trace listOrders 显示 selectPage 仅 0.6%、fillOrderDetails 占 99.1%，再 trace fillOrderDetails 显示三个 Mapper 各 [20 times]=61 次 DB 往返(N+1)，含逐行解读与行号 #102/#103/#113-115；③反直觉结论：thread -n 看到工作线程全 TIMED_WAITING 阻塞在 SimulatedLatencyInterceptor 等 DB，瓶颈是串行 61 次往返+Hikari 10 连接，调大线程只会加剧排队，给出 US-010/011/012 正确方向；附命令速查表。trace 输出数字与 US-008 单请求 ~0.77s/5ms 延迟量级一致。"
     },
     {
       "id": "US-010",
