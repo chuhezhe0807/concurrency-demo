@@ -160,8 +160,8 @@
         "Maven build 编译通过"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "新增 config/HikariTuningPostProcessor(BeanPostProcessor)：在连接池懒启动前，若 Environment 读到 demo.optimize.hikari-tuning=true，对自动配置出的 HikariDataSource setMaximumPoolSize(30)/setMinimumIdle(10)/setConnectionTimeout(3000)；false 沿用 yml 基线 10/10/30000。用 Environment 读开关避免 BPP 对 OptimizeProperties 的早期依赖。application.yml hikari 段补注释说明由开关覆盖。mvn compile 通过。实测(hikari DEBUG dump)：false 档 maximumPoolSize=10/connectionTimeout=30000；true 档 =30/3000 且打印开关日志。压测对比(200×5,batch=false,5ms)：false 21.9rps/avg7979/TP99 11851/0% → true 69.7rps/avg1939/TP99 3490/0%(↑3.2×)。超时日志实测：max=10+timeout=3000+200ms 延迟+200 并发 → 错误率 82.5%,日志 'Connection is not available, request timed out after 3002ms (total=10, active=10, idle=0, waiting=189)'。新增 docs/HIKARICP.md(开关档位/超时日志解读/连接数经验公式 core*2+spindle 与 Tn*(Cm-1)+1/leak-detection-threshold 说明)，BENCHMARK.md 加 US-011 对比表。"
     },
     {
       "id": "US-012",

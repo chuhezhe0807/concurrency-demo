@@ -134,3 +134,17 @@
 - SQL stdout 计数(8081 实例,sim-db-latency=0)：batch=false 单请求 62 次(1 count+1 列表+20×3 明细)；batch=true 降为 5 次(1 count+1 列表+user/product/logistics 各 1 次 IN)，明细口径 61→4。两种开关返回 20 条、首条(orderId=1/userName=user_2/productName=product_2/carrier=YTO)完全一致。
 - 压测对比(200×5=1000 请求,5ms 延迟,batch=true 实例)：吞吐 21.9→194.3 req/s(↑约 8.9×)、avg 7979→53.7ms、TP90/95/99 10346/10854/11851→88/105/137ms、错误率均 0%。基线数字沿用 US-008(同机同 5ms 延迟)。
 环境备注：验证用 8081 端口起实例避免占用既有 8080；验证毕已 pkill 清理。spring-boot:run 传参用 -Dspring-boot.run.arguments="--demo.optimize.batch-query=true ..."。
+
+## US-011 HikariCP 连接池调优开关 [2026-06-05] PASS
+做了什么：
+- 新增 config/HikariTuningPostProcessor 实现 BeanPostProcessor：postProcessAfterInitialization 中若 bean 是 HikariDataSource 且 Environment 读到 demo.optimize.hikari-tuning=true，则 setMaximumPoolSize(30)/setMinimumIdle(10)/setConnectionTimeout(3000) 并打日志；false 沿用 application.yml 基线 10/10/30000。改动最小(不自定义 DataSource Bean)，在连接池懒启动取连接前覆盖参数生效；用 Environment 读开关规避 BPP 早期依赖 OptimizeProperties。
+- application.yml hikari 段加注释，说明 true 时由 HikariTuningPostProcessor 覆盖。
+- 新增 docs/HIKARICP.md：开关档位表、连接超时日志展示与逐字段解读(total/active/idle/waiting)、错误率与 TP99 对比表、连接数经验公式(core*2+spindle 及 Tn*(Cm-1)+1 防死锁)、leak-detection-threshold 说明。
+- jmeter/BENCHMARK.md 增加 US-011 对比表并交叉引用 docs/HIKARICP.md。
+改动文件：config/HikariTuningPostProcessor.java(新增)、application.yml(注释)、docs/HIKARICP.md(新增)、jmeter/BENCHMARK.md、ralph/prd.json、ralph/progress.txt
+如何验证：
+- mvn -DskipTests compile 通过。
+- hikari DEBUG dump(8081,curl 触发连接池)：false 档 connectionTimeout=30000/maximumPoolSize=10/minimumIdle=10，无开关日志；true 档 =3000/30/10 且打印 "HikariCP 调优开关已开启 -> maximumPoolSize=30, minimumIdle=10, connectionTimeout=3000ms"。
+- 压测对比(200×5=1000,batch=false,5ms 延迟)：hikari-tuning=false(沿用 US-008 基线)21.9rps/avg7979ms/TP90-95-99=10346/10854/11851/0% → true 69.7rps/avg1939.8ms/TP90-95-99=2880/3147/3490/0%，吞吐↑约3.2×、TP99 降约70%。
+- 连接超时日志实测：max=10 + 命令行覆盖 connection-timeout=3000 + sim-db-latency=200ms + batch=false + 200 并发 1 循环 → summary 错误率 82.5%(165/200)，日志 "HikariPool-1 - Connection is not available, request timed out after 3002ms (total=10, active=10, idle=0, waiting=189)"，印证基线 0% 错误是因 30s 超时够长(慢而不错)。
+环境备注：超时演示靠命令行 --spring.datasource.hikari.connection-timeout=3000 覆盖 yml(BPP 仅在 true 时介入，false 档由 @ConfigurationProperties 绑定可命令行覆盖)；验证毕 8081 已清理。

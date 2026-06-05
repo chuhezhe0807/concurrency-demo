@@ -14,7 +14,9 @@ spring:
     password: demo123
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
-      maximum-pool-size: 10       # 基线未优化：HikariCP 默认 10 连接
+      # 基线档（未优化）。demo.optimize.hikari-tuning=true 时由 HikariTuningPostProcessor
+      # 覆盖为 30 连接 / 10 最小空闲 / 3s 超时（US-011）。
+      maximum-pool-size: 10       # 基线未优化：HikariCP 10 连接
       minimum-idle: 10
       connection-timeout: 30000   # 基线未优化：30s 超时
       # 启动时不因数据库未就绪而失败（MySQL 由 docker-compose 在 US-002/US-003 提供）
