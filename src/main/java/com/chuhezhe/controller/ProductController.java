@@ -46,4 +46,11 @@ public class ProductController {
                                          @RequestParam BigDecimal newPrice) throws InterruptedException {
         return cacheRaceDemoService.run(id, newPrice);
     }
+
+    /** US-013 方案一：延迟双删。同样的竞态下，第二次删除清掉被回填的旧值，最终一致。 */
+    @PostMapping("/products/{id}/double-delete")
+    public Map<String, Object> doubleDelete(@PathVariable Long id,
+                                            @RequestParam BigDecimal newPrice) throws InterruptedException {
+        return cacheRaceDemoService.runWithDoubleDelete(id, newPrice);
+    }
 }

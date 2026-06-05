@@ -115,4 +115,42 @@ docker exec concurrency-demo-redis redis-cli DEL "product::5"
 
 ## 5. 三方案演示
 
-以下章节随各方案实现逐个补充实测（延迟双删 / 订阅 binlog / 短过期兜底）。
+### 5.1 延迟双删
+
+写线程：`删缓存 → 改库 → 提交 → 延迟 N ms → 再删一次`。第二次删除把竞态期间被并发读回填的
+旧值清掉，最终一致。代码见 `CacheRaceDemoService.runWithDoubleDelete`（编排在事务外，因为第二次删
+必须发生在**提交之后**）。
+
+```bash
+# 对照：裸竞态（stale=true）
+curl -s -X POST "http://localhost:8080/products/5/stale-race?newPrice=111.11"; echo
+# 方案一：延迟双删（fixed=true）
+curl -s -X POST "http://localhost:8080/products/5/double-delete?newPrice=222.22"; echo
+```
+
+实测：
+
+```json
+// 裸竞态
+{"threadB_readValue":15.99,"dbAfter":111.11,"cacheAfter":15.99,"stale":true}
+// 延迟双删
+{"threadB_readValue":15.99,"cacheAfterSecondDelete":null,"reReadValue":222.22,"dbAfter":222.22,"fixed":true}
+```
+
+读线程同样在窗口内回填了旧值（`threadB_readValue=15.99`），但提交后延迟 1000ms 的第二次删除把它清空
+（`cacheAfterSecondDelete=null`），再读回源得到新值（`reReadValue=222.22`）。
+
+要点与局限：
+
+- **延迟时长 N 要大于「一次并发读从查库到回填」的耗时**，否则第二次删早于回填，旧值又被留下。本 demo 取
+  hold=1500ms、第二次删延迟=1000ms，确保第二次删发生在读回填之后。
+- 第二次删除若失败（Redis 抖动），仍会留下脏值——生产中常配合「删除重试 / 短 TTL 兜底」。
+- 第二次删除一般丢到异步线程/延迟队列，避免阻塞写请求。
+
+### 5.2 订阅 binlog
+
+（待补充）
+
+### 5.3 短过期兜底
+
+（待补充）

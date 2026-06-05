@@ -61,6 +61,16 @@ public class ProductService {
         sleepQuietly(holdMillis);        // hold：方法返回后 Spring 才提交事务
     }
 
+    /**
+     * US-013 演示专用：只改库 + hold 住事务，不碰缓存。缓存的删除由调用方在事务外控制
+     * （延迟双删需要在「提交后」再删一次，故不放在本事务方法里）。
+     */
+    @Transactional
+    public void updatePriceTxHold(Long id, BigDecimal price, long holdMillis) {
+        doUpdatePrice(id, price);
+        sleepQuietly(holdMillis);
+    }
+
     private int doUpdatePrice(Long id, BigDecimal price) {
         return productMapper.update(null, new LambdaUpdateWrapper<Product>()
                 .set(Product::getPrice, price)

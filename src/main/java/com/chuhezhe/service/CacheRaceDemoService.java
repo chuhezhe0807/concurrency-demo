@@ -77,4 +77,63 @@ public class CacheRaceDemoService {
                 : "本次未复现（时序未命中，可重试或调大 holdMillis）");
         return r;
     }
+
+    /**
+     * 方案一：延迟双删。写线程「删缓存 → 改库(hold) → 提交 → 延迟 → 再删一次」。
+     * 与裸竞态相同的并发读会在中途回填旧值，但第二次删除把它清掉，最终一致。
+     */
+    public Map<String, Object> runWithDoubleDelete(Long id, BigDecimal newPrice) throws InterruptedException {
+        Cache cache = cacheManager.getCache("product");
+        if (cache != null) {
+            cache.evict(id);
+        }
+        BigDecimal priceBefore = productMapper.selectById(id).getPrice();
+
+        long holdMillis = 1500;       // 模拟慢事务：方法返回前不提交
+        long secondDeleteDelay = 1000; // 提交后延迟再删（需 > 一次读回填耗时）
+        Thread writer = new Thread(() -> {
+            if (cache != null) {
+                cache.evict(id);                                   // 第一次删
+            }
+            productService.updatePriceTxHold(id, newPrice, holdMillis); // 改库 + hold，返回后提交
+            sleepQuietly(secondDeleteDelay);                       // 延迟
+            if (cache != null) {
+                cache.evict(id);                                   // 第二次删：清掉竞态期被回填的旧值
+            }
+        }, "double-delete-writer");
+        writer.start();
+
+        Thread.sleep(400);
+        Product readByB = productService.getById(id);   // 同样回填旧值（被第二次删覆盖）
+
+        writer.join();   // 等提交 + 延迟 + 第二次删完成
+
+        Cache.ValueWrapper vw = cache == null ? null : cache.get(id);
+        BigDecimal cacheAfterSecondDelete = vw == null ? null : ((Product) vw.get()).getPrice();
+        Product reRead = productService.getById(id);    // 第二次删后再读：miss 回源拿到新值
+        BigDecimal dbAfter = productMapper.selectById(id).getPrice();
+
+        Map<String, Object> r = new LinkedHashMap<>();
+        r.put("priceBefore", priceBefore);
+        r.put("newPrice", newPrice);
+        r.put("threadB_readValue", readByB == null ? null : readByB.getPrice());
+        r.put("cacheAfterSecondDelete", cacheAfterSecondDelete);
+        r.put("reReadValue", reRead == null ? null : reRead.getPrice());
+        r.put("dbAfter", dbAfter);
+        boolean fixed = cacheAfterSecondDelete == null
+                && reRead != null && dbAfter.compareTo(reRead.getPrice()) == 0;
+        r.put("fixed", fixed);
+        r.put("说明", fixed
+                ? "延迟双删生效：第二次删清掉了被回填的旧值，第二次删后缓存为空，再读回源得到新值=" + dbAfter
+                : "本次双删未生效（second-delete 早于回填？可调大 sleep/secondDeleteDelay 重试）");
+        return r;
+    }
+
+    private static void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
 }
