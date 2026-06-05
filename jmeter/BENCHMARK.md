@@ -56,3 +56,37 @@ HikariCP 默认 connection-timeout 为 30s，请求虽慢但仍在超时内完�
 会观察到快速失败带来的错误率变化。
 
 每个优化阶段（US-010 起）都会用同一脚本、同一 5ms 延迟复测，记录优化前后对比。
+
+## US-010 N+1 → 批量查询对比（demo.optimize.batch-query）
+
+打开开关后，`fillOrderDetails` 的逐条 `selectById` 改为按本页 id 收集后各发一次 `IN` 批量查询
+（`selectBatchIds` + 内存 Map 匹配）。单页查询次数与页大小解耦：
+
+| 口径 | batch-query=false（N+1） | batch-query=true（批量） |
+|------|--------------------------|--------------------------|
+| 单请求 SQL 次数（含分页 count） | 62（1 count + 1 列表 + 20×3 明细） | 5（1 count + 1 列表 + 3 批量 IN） |
+| 明细查询口径 | 61 | 4 |
+
+同一脚本（200 线程 × 5 循环 = 1000 请求）、同 5ms 模拟延迟下压测对比：
+
+| 指标 | 优化前（false） | 优化后（true） |
+|------|----------------|---------------|
+| 吞吐量 | ~21.9 req/s | ~194.3 req/s（↑ ~8.9×） |
+| 平均响应时间 | ~7979 ms | ~53.7 ms（↓ ~99%） |
+| TP90 / TP95 / TP99 | 10346 / 10854 / 11851 ms | 88 / 105 / 137 ms |
+| 错误率 | 0% | 0% |
+
+复现命令：
+
+```bash
+# 优化后实例（开关打开 + 5ms 延迟）
+JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home \
+  mvn -DskipTests spring-boot:run \
+  -Dspring-boot.run.arguments="--demo.optimize.batch-query=true --demo.sim-db-latency-ms=5"
+
+# 压测（脚本已参数化 port，可 -Jport 指向不同实例）
+cd jmeter && jmeter -n -t order_list_test.jmx -l result.jtl -e -o report/
+```
+
+结论：N+1 的本质是「查询次数随页大小线性增长」，每次又叠加固定网络往返延迟；批量查询把
+60 次明细往返压成 3 次，串行延迟链被砍断，是这条优化曲线里收益最大的一步。

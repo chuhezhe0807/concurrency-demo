@@ -122,3 +122,15 @@
 改动文件：docs/ARTHAS.md(新增)、ralph/prd.json(US-009 passes=true+notes)
 环境备注：as.sh 已由用户下载到仓库根目录(34KB, ARTHAS_SCRIPT_VERSION=4.2.2)。trace 示例数字与 US-008 实测(单请求 ~0.77s、5ms/查询)量级一致，未实跑 attach(手动演示项)。
 如何验证：本 story 不纳入自动化验证；文档自洽，命令与类/方法名(com.chuhezhe.service.OrderService.listOrders/fillOrderDetails)与源码一致，启动方式与本机已下载的 as.sh 对齐。
+
+## US-010 N+1 优化：批量查询开关 [2026-06-05] PASS
+做了什么：
+- OrderService 构造注入 OptimizeProperties；listOrders 按 isBatchQuery() 分流：false→fillOrderDetails(原 N+1，方法名保留供 US-009 Arthas)，true→新增 fillOrderDetailsBatch。
+- fillOrderDetailsBatch：收集本页 userId/productId(distinct)/orderId，user/product 用 selectBatchIds，logistics 用 LambdaQueryWrapper.in(orderId)+selectList，三者各转 Map 后内存匹配；空页直接返回。
+- 抽公共 buildOrderVO(order,user,product,logistics) 复用 VO 装配，消除两条路径重复。
+改动文件：service/OrderService.java(改)、jmeter/BENCHMARK.md(加 US-010 对比章节)、ralph/prd.json、ralph/progress.txt
+如何验证：
+- mvn -DskipTests compile 通过。
+- SQL stdout 计数(8081 实例,sim-db-latency=0)：batch=false 单请求 62 次(1 count+1 列表+20×3 明细)；batch=true 降为 5 次(1 count+1 列表+user/product/logistics 各 1 次 IN)，明细口径 61→4。两种开关返回 20 条、首条(orderId=1/userName=user_2/productName=product_2/carrier=YTO)完全一致。
+- 压测对比(200×5=1000 请求,5ms 延迟,batch=true 实例)：吞吐 21.9→194.3 req/s(↑约 8.9×)、avg 7979→53.7ms、TP90/95/99 10346/10854/11851→88/105/137ms、错误率均 0%。基线数字沿用 US-008(同机同 5ms 延迟)。
+环境备注：验证用 8081 端口起实例避免占用既有 8080；验证毕已 pkill 清理。spring-boot:run 传参用 -Dspring-boot.run.arguments="--demo.optimize.batch-query=true ..."。

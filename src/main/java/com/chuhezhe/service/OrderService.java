@@ -10,6 +10,7 @@ import com.chuhezhe.entity.Logistics;
 import com.chuhezhe.entity.Order;
 import com.chuhezhe.entity.Product;
 import com.chuhezhe.entity.User;
+import com.chuhezhe.config.OptimizeProperties;
 import com.chuhezhe.mapper.LogisticsMapper;
 import com.chuhezhe.mapper.OrderMapper;
 import com.chuhezhe.mapper.ProductMapper;
@@ -22,7 +23,10 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class OrderService {
@@ -34,6 +38,7 @@ public class OrderService {
     private final SmsService smsService;
     private final EmailService emailService;
     private final PointsService pointsService;
+    private final OptimizeProperties optimizeProperties;
 
     public OrderService(OrderMapper orderMapper,
                         UserMapper userMapper,
@@ -41,7 +46,8 @@ public class OrderService {
                         LogisticsMapper logisticsMapper,
                         SmsService smsService,
                         EmailService emailService,
-                        PointsService pointsService) {
+                        PointsService pointsService,
+                        OptimizeProperties optimizeProperties) {
         this.orderMapper = orderMapper;
         this.userMapper = userMapper;
         this.productMapper = productMapper;
@@ -49,6 +55,7 @@ public class OrderService {
         this.smsService = smsService;
         this.emailService = emailService;
         this.pointsService = pointsService;
+        this.optimizeProperties = optimizeProperties;
     }
 
     /**
@@ -100,7 +107,11 @@ public class OrderService {
 
     public List<OrderVO> listOrders(long pageNo, long pageSize) {
         IPage<Order> page = orderMapper.selectPage(new Page<>(pageNo, pageSize), null);
-        return fillOrderDetails(page.getRecords());
+        List<Order> orders = page.getRecords();
+        // 开关分流：开启批量查询走 IN + 内存匹配（约 4 次查询），否则保持 N+1（61 次）。
+        return optimizeProperties.isBatchQuery()
+                ? fillOrderDetailsBatch(orders)
+                : fillOrderDetails(orders);
     }
 
     /**
@@ -114,30 +125,63 @@ public class OrderService {
             Product product = productMapper.selectById(order.getProductId());
             Logistics logistics = logisticsMapper.selectOne(
                     new LambdaQueryWrapper<Logistics>().eq(Logistics::getOrderId, order.getId()));
-
-            OrderVO vo = new OrderVO();
-            vo.setOrderId(order.getId());
-            vo.setOrderNo(order.getOrderNo());
-            vo.setQuantity(order.getQuantity());
-            vo.setAmount(order.getAmount());
-            vo.setStatus(order.getStatus());
-            vo.setCreateTime(order.getCreateTime());
-            if (user != null) {
-                vo.setUserId(user.getId());
-                vo.setUserName(user.getUsername());
-                vo.setUserPhone(user.getPhone());
-            }
-            if (product != null) {
-                vo.setProductId(product.getId());
-                vo.setProductName(product.getName());
-                vo.setProductPrice(product.getPrice());
-            }
-            if (logistics != null) {
-                vo.setCarrier(logistics.getCarrier());
-                vo.setTrackingNo(logistics.getTrackingNo());
-            }
-            result.add(vo);
+            result.add(buildOrderVO(order, user, product, logistics));
         }
         return result;
+    }
+
+    /**
+     * 批量写法（US-010）：先收集本页所有 userId/productId/orderId，各发一次 IN 查询，
+     * 再在内存里用 Map 匹配。无论一页多少条订单，固定 1(列表)+3(批量) = 约 4 次查询。
+     */
+    private List<OrderVO> fillOrderDetailsBatch(List<Order> orders) {
+        if (orders.isEmpty()) {
+            return new ArrayList<>();
+        }
+        List<Long> userIds = orders.stream().map(Order::getUserId).distinct().toList();
+        List<Long> productIds = orders.stream().map(Order::getProductId).distinct().toList();
+        List<Long> orderIds = orders.stream().map(Order::getId).toList();
+
+        Map<Long, User> userMap = userMapper.selectBatchIds(userIds).stream()
+                .collect(Collectors.toMap(User::getId, Function.identity()));
+        Map<Long, Product> productMap = productMapper.selectBatchIds(productIds).stream()
+                .collect(Collectors.toMap(Product::getId, Function.identity()));
+        Map<Long, Logistics> logisticsMap = logisticsMapper.selectList(
+                        new LambdaQueryWrapper<Logistics>().in(Logistics::getOrderId, orderIds)).stream()
+                .collect(Collectors.toMap(Logistics::getOrderId, Function.identity(), (a, b) -> a));
+
+        List<OrderVO> result = new ArrayList<>(orders.size());
+        for (Order order : orders) {
+            result.add(buildOrderVO(order,
+                    userMap.get(order.getUserId()),
+                    productMap.get(order.getProductId()),
+                    logisticsMap.get(order.getId())));
+        }
+        return result;
+    }
+
+    private OrderVO buildOrderVO(Order order, User user, Product product, Logistics logistics) {
+        OrderVO vo = new OrderVO();
+        vo.setOrderId(order.getId());
+        vo.setOrderNo(order.getOrderNo());
+        vo.setQuantity(order.getQuantity());
+        vo.setAmount(order.getAmount());
+        vo.setStatus(order.getStatus());
+        vo.setCreateTime(order.getCreateTime());
+        if (user != null) {
+            vo.setUserId(user.getId());
+            vo.setUserName(user.getUsername());
+            vo.setUserPhone(user.getPhone());
+        }
+        if (product != null) {
+            vo.setProductId(product.getId());
+            vo.setProductName(product.getName());
+            vo.setProductPrice(product.getPrice());
+        }
+        if (logistics != null) {
+            vo.setCarrier(logistics.getCarrier());
+            vo.setTrackingNo(logistics.getTrackingNo());
+        }
+        return vo;
     }
 }

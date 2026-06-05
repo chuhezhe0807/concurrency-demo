@@ -145,8 +145,8 @@
         "curl GET /orders 在开关开启时返回结果正确"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "OrderService 注入 OptimizeProperties，listOrders 按 isBatchQuery() 分流：false 走原 fillOrderDetails(N+1)，true 走新增 fillOrderDetailsBatch(收集本页 userId/productId/orderId 各发一次 IN：user/product 用 selectBatchIds、logistics 用 in(orderId)+selectList，内存 Map 匹配)。抽公共 buildOrderVO 复用装配逻辑，保留 fillOrderDetails 方法名供 US-009 Arthas。mvn compile 通过。实测(SQL stdout 计数)：开关 false 单请求 62 次(1count+1列表+20×3)，true 降为 5 次(1count+1列表+3 IN)，明细口径 61→4，两者返回首条与 20 条结果完全一致。压测对比(200×5,5ms 延迟,8081 实例)：21.9→194.3 req/s(↑8.9×)、avg 7979→53.7ms、TP99 11851→137ms、错误率均 0%，已写入 jmeter/BENCHMARK.md。"
     },
     {
       "id": "US-011",
