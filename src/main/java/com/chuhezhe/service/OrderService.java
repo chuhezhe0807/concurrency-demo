@@ -38,6 +38,7 @@ public class OrderService {
     private final SmsService smsService;
     private final EmailService emailService;
     private final PointsService pointsService;
+    private final ProductService productService;
     private final OptimizeProperties optimizeProperties;
 
     public OrderService(OrderMapper orderMapper,
@@ -47,6 +48,7 @@ public class OrderService {
                         SmsService smsService,
                         EmailService emailService,
                         PointsService pointsService,
+                        ProductService productService,
                         OptimizeProperties optimizeProperties) {
         this.orderMapper = orderMapper;
         this.userMapper = userMapper;
@@ -55,6 +57,7 @@ public class OrderService {
         this.smsService = smsService;
         this.emailService = emailService;
         this.pointsService = pointsService;
+        this.productService = productService;
         this.optimizeProperties = optimizeProperties;
     }
 
@@ -122,7 +125,8 @@ public class OrderService {
         List<OrderVO> result = new ArrayList<>(orders.size());
         for (Order order : orders) {
             User user = userMapper.selectById(order.getUserId());
-            Product product = productMapper.selectById(order.getProductId());
+            // 商品查询走 ProductService，cache 开关开启时命中 Redis（US-012）
+            Product product = productService.getById(order.getProductId());
             Logistics logistics = logisticsMapper.selectOne(
                     new LambdaQueryWrapper<Logistics>().eq(Logistics::getOrderId, order.getId()));
             result.add(buildOrderVO(order, user, product, logistics));

@@ -148,3 +148,16 @@
 - 压测对比(200×5=1000,batch=false,5ms 延迟)：hikari-tuning=false(沿用 US-008 基线)21.9rps/avg7979ms/TP90-95-99=10346/10854/11851/0% → true 69.7rps/avg1939.8ms/TP90-95-99=2880/3147/3490/0%，吞吐↑约3.2×、TP99 降约70%。
 - 连接超时日志实测：max=10 + 命令行覆盖 connection-timeout=3000 + sim-db-latency=200ms + batch=false + 200 并发 1 循环 → summary 错误率 82.5%(165/200)，日志 "HikariPool-1 - Connection is not available, request timed out after 3002ms (total=10, active=10, idle=0, waiting=189)"，印证基线 0% 错误是因 30s 超时够长(慢而不错)。
 环境备注：超时演示靠命令行 --spring.datasource.hikari.connection-timeout=3000 覆盖 yml(BPP 仅在 true 时介入，false 档由 @ConfigurationProperties 绑定可命令行覆盖)；验证毕 8081 已清理。
+
+## US-012 Redis 缓存热点商品查询开关 [2026-06-05] PASS
+做了什么：
+- 新增 config/CacheConfig：@EnableCaching + RedisCacheManager。value 用 GenericJackson2JsonRedisSerializer，自定义 ObjectMapper 注册 JavaTimeModule(支持 Product.updateTime 的 LocalDateTime)并 activateDefaultTyping(NON_FINAL，写 @class 便于反序列化还原 Product)；entryTtl 10min(短过期也为 US-013 兜底铺垫)、disableCachingNullValues。
+- 新增 service/ProductService.getById(Long id)：@Cacheable(cacheNames=product, key=#id, condition="@optimizeProperties.cache", unless="#result == null")。condition 让缓存只在开关打开时读写，关闭时退回每次查库；unless 防止把不存在的商品(null)缓存进去造成穿透。
+- OrderService 构造注入 ProductService；N+1 路径 fillOrderDetails 把原 productMapper.selectById 改为 productService.getById(order.getProductId())，使缓存装配在逐条路径上。batch 路径 fillOrderDetailsBatch 仍直连 selectBatchIds(批量与缓存是两条提速轴，不叠加)。
+改动文件：config/CacheConfig.java(新增)、service/ProductService.java(新增)、service/OrderService.java(改：注入+fillOrderDetails 走缓存)、jmeter/BENCHMARK.md(加 US-012 章节)、ralph/prd.json、ralph/progress.txt
+如何验证：
+- mvn -DskipTests compile 通过，CacheConfig/ProductService class 生成。
+- 运行时实测(8081, cache=true, batch=false, sim-db-latency=0)：清空 redis 后 GET /orders?pageSize=20，Redis 出现 20 个 product::N key；GET product::7 内容为 {"@class":"com.chuhezhe.entity.Product","id":7,"name":"product_7","price":["java.math.BigDecimal",17.99],"stock":1000000,"updateTime":[2026,6,4,18,30,39],"deleted":0}；TTL(product::7)≈600s 证明 entryTtl 10min 生效(Spring 默认永不过期)；单请求首次(miss)0.487s → 二次(商品全命中)0.145s。
+- 依赖 docker redis(宿主机 6380)healthy；用 docker exec concurrency-demo-redis redis-cli KEYS 'product*' / GET 观察。
+诚实标注(沿用本项目记录风格)：本轮按用户要求未跑完整 1000 请求 JMeter 对比(rps/TP99)。BENCHMARK.md US-012 章节用 DB 往返口径给出对比——cache=false 每请求 61 次 MySQL 往返 → cache=true 预热后降为 41 次(商品 20 次转 Redis 命中)，注入延迟 305ms→205ms；rps/TP99 表格留空待复测，未编造数字。复现命令(预热 curl 后压测)已写入文档。
+环境备注：验证用 8081 实例(避开 8080)；8081 latency=0 与 latency=5 两次均验证毕已 kill 清理。JAVA_HOME 用 /usr/libexec/java_home -v 21。

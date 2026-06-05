@@ -106,3 +106,54 @@ cd jmeter && jmeter -n -t order_list_test.jmx -l result.jtl -e -o report/
 连接超时日志解读、连接数经验公式、leak-detection-threshold 说明见 [../docs/HIKARICP.md](../docs/HIKARICP.md)。
 要点：把超时从 30s 调到 3s 会把“慢”变成“快速失败的错”——基线 0% 错误是因 30s 超时够长（慢而不错），
 实测 10 连接 + 3s 超时 + 200ms 延迟 + 200 并发时错误率达 82.5%，日志显示 `total=10, active=10, idle=0, waiting=189`。
+
+## US-012 Redis 缓存热点商品查询对比（demo.optimize.cache）
+
+打开开关后，`ProductService.getById` 走 `@Cacheable(cacheNames=product, key=#id)`：商品查询先读
+Redis，命中则不查库；只在开关打开时生效（`condition="@optimizeProperties.cache"`），`unless="#result == null"`
+避免缓存空值导致穿透。缓存装配在 N+1（逐条）路径上——`fillOrderDetails` 对每条订单调 `ProductService.getById`，
+所以缓存与 batch-query 是两条不同的提速轴：batch-query 把往返次数压成常数，cache 则把其中的「商品」这一类往返
+从 MySQL 移到 Redis。
+
+### 缓存行为（运行时实测，sim-db-latency-ms=0，cache=true，batch-query=false）
+
+| 现象 | 实测 |
+|------|------|
+| 首次请求（miss，回填缓存） | `GET /orders?pageSize=20` 后 Redis 出现 20 个 `product::N` key |
+| 缓存内容 | JSON 带类型信息，如 `{"@class":"com.chuhezhe.entity.Product","id":7,"name":"product_7",...}` |
+| TTL | `product::7` TTL ≈ 600s，证明 `entryTtl(10min)` 生效（Spring 默认为永不过期） |
+| 命中提速（单请求） | 首次 ~0.487s → 二次（商品全部命中）~0.145s |
+
+`@class` 由 `CacheConfig` 的 `GenericJackson2JsonRedisSerializer` + default typing 写入，反序列化时据此还原为
+`Product`；`JavaTimeModule` 保证 `updateTime`（LocalDateTime）可序列化。可用
+`docker exec concurrency-demo-redis redis-cli KEYS 'product*'` 与 `GET product::7` 直接观察。
+
+### 吞吐对比（DB 往返口径 + 单请求耗时）
+
+JMeter 固定压 `pageNo=1&pageSize=20`，每次都是同一页的 20 个商品，因此缓存预热后商品类查询命中率接近 100%。
+N+1 路径下每请求的 **MySQL 往返**变化：
+
+| 口径（batch-query=false） | cache=false | cache=true（预热后） |
+|---------------------------|-------------|----------------------|
+| MySQL 往返（1 列表 + 20 user + 20 product + 20 logistics） | 61 | 41（商品 20 次转由 Redis 命中） |
+| 注入延迟累计（×5ms） | ~305ms | ~205ms |
+
+> 注：本轮按用户要求未跑完整 1000 请求的 JMeter 对比表（rps/TP99），为避免编造数字此处留空，
+> 复测命令见下方，可补齐后填入。已实测的运行时证据（缓存写入/命中/TTL/序列化、单请求 0.487s→0.145s）见上。
+> 量级判断：在 batch-query=false 基线（~21.9 req/s）上，cache=true 减少约 1/3 的注入延迟往返，吞吐应有可观提升，
+> 但单独开缓存仍受剩余 41 次往返串行链制约，收益不及 batch-query（把往返压成常数）那一步。
+
+复现命令：
+
+```bash
+# 缓存实例（cache 开关打开 + 5ms 延迟，N+1 路径才会逐条走 ProductService）
+JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home \
+  mvn -DskipTests spring-boot:run \
+  -Dspring-boot.run.arguments="--demo.optimize.cache=true --demo.optimize.batch-query=false --demo.sim-db-latency-ms=5"
+
+# 预热填充缓存后再压测
+curl -s "http://localhost:8080/orders?pageNo=1&pageSize=20" >/dev/null
+cd jmeter && jmeter -n -t order_list_test.jmx -l result.jtl -e -o report/
+```
+
+依赖：需 docker-compose 中的 Redis（宿主机端口 6380）。`docker exec concurrency-demo-redis redis-cli` 可观察缓存。

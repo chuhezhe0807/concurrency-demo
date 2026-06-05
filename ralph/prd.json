@@ -175,8 +175,8 @@
         "Maven build 编译通过"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "新增 config/CacheConfig(@EnableCaching + RedisCacheManager，GenericJackson2JsonRedisSerializer+default typing 写 @class、JavaTimeModule 支持 LocalDateTime、entryTtl 10min、disableCachingNullValues)。新增 service/ProductService.getById(@Cacheable cacheNames=product/key=#id, condition=@optimizeProperties.cache 仅开关开启时生效, unless=#result==null 防空值穿透)。OrderService 注入 ProductService，N+1 路径 fillOrderDetails 改调 productService.getById(缓存装配在逐条路径；batch 路径仍直连 selectBatchIds)。mvn compile 通过。运行时实测(8081,cache=true,batch=false,latency=0)：首次请求后 Redis 出现 20 个 product::N key，内容为带 @class 的 JSON(如 product::7={\"@class\":\"...Product\",\"id\":7,...})，TTL≈600s 证明 10min entryTtl 生效，单请求首次 0.487s→二次(命中)0.145s。BENCHMARK.md 加 US-012 章节(缓存行为实测表 + DB 往返口径 61→41/注入延迟 305→205ms + 复现命令)。诚实标注：本轮按用户要求未跑完整 1000 请求 JMeter rps/TP99 对比表，留空待补，未编造数字。依赖 docker redis(6380)已 healthy。"
     },
     {
       "id": "US-013",
