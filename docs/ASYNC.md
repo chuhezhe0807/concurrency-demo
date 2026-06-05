@@ -7,10 +7,31 @@
 ## 开关与代码
 
 - `config/AsyncConfig`：`@EnableAsync` + 自定义线程池 `orderExecutor`。
-- `service/NonCoreTaskService.runAsync`：`@Async("orderExecutor")`，内部依次跑 sms/email/points。
-  单独成 bean 是因为 `@Async` 靠 Spring 代理生效，**同一个 bean 内部自调用不会异步**。
-- `OrderService.placeOrder`：`async=true` 时调 `nonCoreTaskService.runAsync(...)` 立即返回；
+- `event/OrderPlacedEvent`：下单成功事件，在下单事务里发布。
+- `service/NonCoreTaskService.onOrderPlaced`：`@TransactionalEventListener(AFTER_COMMIT)` + `@Async("orderExecutor")`，
+  内部依次跑 sms/email/points。单独成 bean 是因为 `@Async` 靠 Spring 代理生效，**同一个 bean 内部自调用不会异步**。
+- `OrderService.placeOrder`：`async=true` 时 `publishEvent(OrderPlacedEvent)` 后立即返回；
   `false` 时保持同步（US-006 行为）。
+
+### 为什么用事务事件而不是直接 dispatch
+
+非核心任务**必须在核心事务提交成功之后**才执行。若像最初那样在事务内直接 `@Async` dispatch，
+任务会在提交前就在另一个线程跑起来——一旦核心随后回滚，就发生了「订单没成功、短信却已发出」。
+改用 `@TransactionalEventListener(AFTER_COMMIT)`：事件在事务里发布，但监听器被推迟到**提交后**才触发，
+核心回滚则监听器根本不会执行。
+
+实测：
+
+```
+# 正常下单：提交后才异步发通知
+{"orderId":...,"elapsedMs":48}
+[order-async-1] [ASYNC] 事务已提交，非核心任务进入线程池执行 orderNo=ORD...
+[order-async-1] [SMS] / [EMAIL] / [POINTS] ...
+
+# 失败下单（库存不足）：核心回滚 → 无任何通知
+curl ... -d '{"userId":1,"productId":7,"quantity":999999999}'  → 500
+（日志中无 [ASYNC]/[SMS]：回滚未触发任何通知）
+```
 
 ```bash
 JAVA_HOME=$(/usr/libexec/java_home -v 21) \
@@ -64,7 +85,10 @@ curl -s -X POST "http://localhost:8080/orders" \
 
 ## 局限与注意
 
-- 异步任务在下单事务**提交前**就可能开始执行；非核心任务（通知/积分）不依赖订单已提交，可接受。
-  若严格要求「订单提交成功后才发通知」，应改在事务提交后触发（如 `TransactionSynchronization` 的 afterCommit）。
-- @Async 吞异常：返回 void 时异常只进日志，不影响下单主流程；需要结果/重试就用消息队列（US-015）。
-- 线程池是**进程内**的：应用重启会丢未执行完的任务，任务量大或不能丢时应换 MQ（US-015）。
+- 触发时机已用 `AFTER_COMMIT` 修正：核心回滚不会误发通知（见上）。
+- **失败兜底仍缺失**：非核心任务在提交后执行，此时核心已成功、不能再回滚核心（不能因短信没发就取消订单）。
+  方向是「让它最终成功」而非回滚——但当前 @Async 没有重试/持久化：
+  - @Async void 异常只进日志，没人重试；
+  - 线程池是**进程内**的，应用重启会丢掉未执行完的任务。
+- 任务量大或「不能丢」时应换消息队列（US-015）：MQ 持久化 + 手动 ack + 消费端重试 + 死信兜底 + 幂等，
+  把「不丢 + 重试 + 幂等」一起解决。更稳的还可用「本地消息表」（核心事务里同库写一条待办记录，保证原子）。

@@ -11,11 +11,13 @@ import com.chuhezhe.entity.Order;
 import com.chuhezhe.entity.Product;
 import com.chuhezhe.entity.User;
 import com.chuhezhe.config.OptimizeProperties;
+import com.chuhezhe.event.OrderPlacedEvent;
 import com.chuhezhe.mapper.LogisticsMapper;
 import com.chuhezhe.mapper.OrderMapper;
 import com.chuhezhe.mapper.ProductMapper;
 import com.chuhezhe.mapper.UserMapper;
 import com.chuhezhe.vo.OrderVO;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,9 +40,9 @@ public class OrderService {
     private final SmsService smsService;
     private final EmailService emailService;
     private final PointsService pointsService;
-    private final NonCoreTaskService nonCoreTaskService;
     private final ProductService productService;
     private final OptimizeProperties optimizeProperties;
+    private final ApplicationEventPublisher eventPublisher;
 
     public OrderService(OrderMapper orderMapper,
                         UserMapper userMapper,
@@ -49,9 +51,9 @@ public class OrderService {
                         SmsService smsService,
                         EmailService emailService,
                         PointsService pointsService,
-                        NonCoreTaskService nonCoreTaskService,
                         ProductService productService,
-                        OptimizeProperties optimizeProperties) {
+                        OptimizeProperties optimizeProperties,
+                        ApplicationEventPublisher eventPublisher) {
         this.orderMapper = orderMapper;
         this.userMapper = userMapper;
         this.productMapper = productMapper;
@@ -59,9 +61,9 @@ public class OrderService {
         this.smsService = smsService;
         this.emailService = emailService;
         this.pointsService = pointsService;
-        this.nonCoreTaskService = nonCoreTaskService;
         this.productService = productService;
         this.optimizeProperties = optimizeProperties;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -100,10 +102,11 @@ public class OrderService {
         orderMapper.insert(order);
 
         // 非核心：短信 + 邮件 + 积分。
-        // async=true 时丢入 orderExecutor 线程池，下单主线程不等它跑完即返回；
+        // async=true 时发布 OrderPlacedEvent，由 @TransactionalEventListener(AFTER_COMMIT) 在事务
+        // 提交后才丢入 orderExecutor 线程池执行——核心若回滚则事件不投递，不会误发通知；
         // false 时全部同步执行（US-006 行为，拖慢响应）。
         if (optimizeProperties.isAsync()) {
-            nonCoreTaskService.runAsync(req.getUserId(), order.getOrderNo(), amount);
+            eventPublisher.publishEvent(new OrderPlacedEvent(req.getUserId(), order.getOrderNo(), amount));
         } else {
             smsService.send(req.getUserId(), order.getOrderNo());
             emailService.send(req.getUserId(), order.getOrderNo());
