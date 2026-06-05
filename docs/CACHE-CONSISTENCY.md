@@ -186,4 +186,41 @@ curl -s "http://localhost:8080/products/5"; echo                # 回源拿到�
 
 ### 5.3 短过期兜底
 
-（待补充）
+不试图消除竞态，而是把缓存 TTL 设短，让回填的脏值快速过期、下次读自动回源。TTL 由
+`demo.cache.ttl-seconds` 配置（默认 600s，见 `config/CacheConfig`），演示时调到 3s。
+
+```bash
+# TTL 调到 3 秒
+JAVA_HOME=$(/usr/libexec/java_home -v 21) \
+  mvn -DskipTests spring-boot:run \
+  -Dspring-boot.run.arguments="--server.port=8080 --demo.optimize.cache=true --demo.cache.ttl-seconds=3"
+
+curl -s -X POST "http://localhost:8080/products/5/stale-race?newPrice=444.44"; echo
+docker exec concurrency-demo-redis redis-cli TTL "product::5"   # ≈ 2~3
+curl -s "http://localhost:8080/products/5"; echo                 # 立刻读：脏值 15.99
+sleep 3.5
+docker exec concurrency-demo-redis redis-cli GET "product::5"   # 已过期，空
+curl -s "http://localhost:8080/products/5"; echo                 # 回源：新值 444.44
+```
+
+实测：竞态后缓存是脏值 15.99、`TTL=2`；立刻读仍是 15.99；等 3.5s TTL 到期后缓存为空，再读回源
+自愈为 444.44。
+
+要点与局限：
+
+- 最简单，不改写路径、不引组件；但 **TTL 窗口内仍是脏的**，只把不一致时间从「10 分钟」缩到「几秒」。
+- TTL 越短自愈越快，但命中率越低、回源压力越大，需按业务对「容忍多久旧值」与「缓存收益」权衡。
+- 常作为延迟双删 / binlog 的**兜底**：双删漏掉、binlog 延迟时，短 TTL 保证最终一定收敛。
+
+---
+
+## 6. 小结
+
+| 方案 | 一致性 | 复杂度 | 适用 |
+|------|--------|--------|------|
+| `@CacheEvict`（基础） | 解决“忘删”，挡不住回填竞态 | 最低 | 起点，必备 |
+| 延迟双删 | 概率上解决竞态 | 低 | 多数业务，配短 TTL 兜底 |
+| 订阅 binlog | 最终一致、写读解耦最彻底 | 高 | 核心数据 / 多写入口 / 强诉求 |
+| 短过期兜底 | 只缩短脏窗口 | 最低 | 容忍秒级旧值；或作其它方案兜底 |
+
+实战推荐：**延迟双删 + 短 TTL 兜底**为主；核心、强一致场景上 **binlog 订阅**。

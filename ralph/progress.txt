@@ -161,3 +161,16 @@
 - 依赖 docker redis(宿主机 6380)healthy；用 docker exec concurrency-demo-redis redis-cli KEYS 'product*' / GET 观察。
 诚实标注(沿用本项目记录风格)：本轮按用户要求未跑完整 1000 请求 JMeter 对比(rps/TP99)。BENCHMARK.md US-012 章节用 DB 往返口径给出对比——cache=false 每请求 61 次 MySQL 往返 → cache=true 预热后降为 41 次(商品 20 次转 Redis 命中)，注入延迟 305ms→205ms；rps/TP99 表格留空待复测，未编造数字。复现命令(预热 curl 后压测)已写入文档。
 环境备注：验证用 8081 实例(避开 8080)；8081 latency=0 与 latency=5 两次均验证毕已 kill 清理。JAVA_HOME 用 /usr/libexec/java_home -v 21。
+
+## US-013 缓存一致性演示与方案对比 [2026-06-05] PASS
+做了什么：
+- 正确写法：ProductService.updatePrice 加 @CacheEvict(product, key=#id, condition="@optimizeProperties.cache")，改库后清缓存。
+- 竞态确定性复现：新增 ProductService.updatePriceHoldingTx(@Transactional, 先 cache.evict→改库→hold holdMillis 不提交，方法返回才 commit) + CacheRaceDemoService.run 用真实线程编排(写线程 hold 1500ms；主线程 sleep 400ms 后调 getById 当读线程 B)。POST /products/{id}/stale-race?newPrice= 实测：threadB_readValue=15.99(旧)、dbAfter=777.77(新)、cacheAfter=15.99(脏)、stale=true。根因：读的"查库+回填"非原子，被写的"删缓存+改库未提交"插入；MySQL REPEATABLE-READ 下 B 读不到 A 未提交的新值。
+- 方案一 延迟双删：ProductService.updatePriceTxHold(只改库+hold，不碰缓存) + CacheRaceDemoService.runWithDoubleDelete(删→updatePriceTxHold→提交→延迟1000ms→再删)。POST /products/{id}/double-delete 实测 fixed=true：threadB 仍回填旧值，但第二次删后 cacheAfterSecondDelete=null，reReadValue=222.22=dbAfter。
+- 方案二 订阅 binlog：pom 引入 com.zendesk:mysql-binlog-connector-java 0.29.2(纯 Java 伪从库，免额外 docker 镜像)。新增 config/BinlogCacheEvictListener(@ConditionalOnProperty demo.binlog-cache-evict=true)：BinaryLogClient 连 localhost:3306(复用 spring.datasource 账号, serverId 65535)，TABLE_MAP 维护 tableId→db.table，监听 t_product 的 Update/Write/DeleteRows，取 row[0]=id 删 product::id。写路径完全不碰缓存，以提交后的 binlog 为准。init SQL 追加 GRANT REPLICATION SLAVE,CLIENT TO demo(可复现)。实测：提交后日志 "[BINLOG] 监听到 t_product id=5 变更，已删缓存 product::5"，缓存自愈，再读得新值 333.33。
+- 方案三 短过期兜底：CacheConfig 的 entryTtl 由硬编码 10min 改为读 demo.cache.ttl-seconds(默认 600s)。--demo.cache.ttl-seconds=3 实测：竞态后脏值 TTL=2，立刻读仍 15.99，等 3.5s 过期后缓存空，再读自愈为 444.44。
+- 文档 docs/CACHE-CONSISTENCY.md：竞态时序图 + 根因 + 三方案对比表 + 各方案复现命令/实测/局限 + 小结选型(延迟双删+短TTL为主，核心数据上 binlog)。
+改动文件：service/ProductService.java、service/CacheRaceDemoService.java、controller/ProductController.java、config/CacheConfig.java、config/BinlogCacheEvictListener.java(新增)、pom.xml、docker/mysql/init/01-schema-and-seed.sql、docs/CACHE-CONSISTENCY.md(新增)、ralph/prd.json、ralph/progress.txt
+提交：分 4 次提交——文档+竞态复现(896063b)、延迟双删(7f02f42)、binlog(bb73527)、短过期兜底(本次)。
+如何验证：mvn -DskipTests compile 通过；四个 endpoint(stale-race/double-delete/binlog 自愈/短TTL自愈)均在 8081 cache=true 实例实测通过(见上各方案数字)；每次验证后还原商品5 价=15.99、清 product::5、kill 8081。
+环境备注：竞态依赖 MySQL REPEATABLE-READ(默认)与 cache=true；binlog 依赖 ROW 格式(MySQL8 默认)+demo 复制权限(已写入 init SQL，本次为运行时 GRANT 生效)。application.yml 的 cache 开关被本地改为 true(测试用)未纳入提交，仓库基线保持 false。

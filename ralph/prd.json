@@ -189,8 +189,8 @@
         "Maven build 编译通过"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "ProductService.updatePrice 走 @CacheEvict(product,key=#id,condition=@optimizeProperties.cache)。竞态确定性复现：ProductService.updatePriceHoldingTx(先删缓存→改库→hold 住事务不提交)+CacheRaceDemoService 真实线程编排(写线程 hold 1500ms, 读线程 400ms 切入)，POST /products/{id}/stale-race 实测 threadB读到旧值15.99、dbAfter=777.77、cacheAfter=15.99、stale=true(MySQL REPEATABLE-READ 下读看不到未提交的写)。三方案均做成可运行 endpoint 并实测：①延迟双删 POST /products/{id}/double-delete(删→改库→提交→延迟1000ms→再删)，fixed=true、第二次删后缓存空、回源得新值；②订阅 binlog config/BinlogCacheEvictListener(引入 mysql-binlog-connector-java 0.29.2 纯Java伪从库, demo.binlog-cache-evict=true 门控, 监听 t_product 行变更删 product::id, init SQL 给 demo 授 REPLICATION 权限)，实测提交后日志'[BINLOG]...已删缓存 product::5'、缓存自愈; ③短过期兜底 CacheConfig TTL 改为 demo.cache.ttl-seconds 可配(默认600s)，调到3s 实测脏值 TTL=2、3.5s 后过期自愈。文档 docs/CACHE-CONSISTENCY.md(竞态时序+根因+三方案对比表+各方案实测与局限+小结选型)。mvn compile 通过。"
     },
     {
       "id": "US-014",
