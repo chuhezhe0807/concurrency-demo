@@ -149,7 +149,40 @@ curl -s -X POST "http://localhost:8080/products/5/double-delete?newPrice=222.22"
 
 ### 5.2 订阅 binlog
 
-（待补充）
+业务写路径**完全不删缓存**，改由独立组件监听 MySQL binlog——binlog 只在事务**提交后**才产生，
+所以以它为准删缓存能从根上避开「读回填旧值」竞态。本 demo 用纯 Java 的
+`mysql-binlog-connector-java`（简化版 Canal），以伪从库身份连接 MySQL，监听 `t_product` 行变更后
+删 `product::id`。代码见 `config/BinlogCacheEvictListener`，由 `demo.binlog-cache-evict=true` 启用。
+
+前提：MySQL 开启 binlog 且 ROW 格式（MySQL 8 默认满足）；监听账号需复制权限
+（init SQL 已对 demo 授予 `REPLICATION SLAVE, REPLICATION CLIENT`）。
+
+```bash
+# 启动时额外打开 binlog 监听
+JAVA_HOME=$(/usr/libexec/java_home -v 21) \
+  mvn -DskipTests spring-boot:run \
+  -Dspring-boot.run.arguments="--server.port=8080 --demo.optimize.cache=true --demo.binlog-cache-evict=true"
+
+# 触发裸竞态（不靠写路径删缓存）
+curl -s -X POST "http://localhost:8080/products/5/stale-race?newPrice=333.33"; echo
+docker exec concurrency-demo-redis redis-cli GET "product::5"   # 提交后 binlog 监听器很快删空
+curl -s "http://localhost:8080/products/5"; echo                # 回源拿到新值
+```
+
+实测：竞态在提交瞬间仍是脏的（响应 `stale=true`），但提交后 binlog 事件随即到达，监听器删缓存：
+
+```
+[BINLOG] Connected to localhost:3306 at binlog.000003/5524 (sid:65535)
+[BINLOG] 监听到 t_product id=5 变更，已删缓存 product::5
+```
+
+之后 Redis 中 `product::5` 为空，再读回源得到新值 333.33，自动恢复一致。
+
+要点与局限：
+
+- 以**提交后的 binlog** 为准，写读解耦：哪怕是直连库的批处理、其它服务写库，缓存也会被清，无写入口遗漏。
+- 仍是**最终一致**：从提交到 binlog 处理有毫秒~秒级延迟，期间缓存可能短暂为旧值。
+- 引入 binlog 订阅组件（生产用 Canal/Debezium），需保证消息不丢、消费幂等，运维成本高于双删。
 
 ### 5.3 短过期兜底
 

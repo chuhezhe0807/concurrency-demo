@@ -116,3 +116,8 @@ FROM (SELECT a.d + b.d*10 + c.d*100 + d.d*1000 + e.d*10000 AS n
 WHERE n BETWEEN 1 AND 30000;
 
 DROP TABLE IF EXISTS digits;
+
+-- US-013 方案二：binlog 订阅删缓存需要 demo 用户有复制权限（以伪从库身份读 binlog）。
+-- MySQL 8 默认已开启 binlog 且为 ROW 格式，无需额外配置。
+GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'demo'@'%';
+FLUSH PRIVILEGES;
