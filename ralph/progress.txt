@@ -174,3 +174,16 @@
 提交：分 4 次提交——文档+竞态复现(896063b)、延迟双删(7f02f42)、binlog(bb73527)、短过期兜底(本次)。
 如何验证：mvn -DskipTests compile 通过；四个 endpoint(stale-race/double-delete/binlog 自愈/短TTL自愈)均在 8081 cache=true 实例实测通过(见上各方案数字)；每次验证后还原商品5 价=15.99、清 product::5、kill 8081。
 环境备注：竞态依赖 MySQL REPEATABLE-READ(默认)与 cache=true；binlog 依赖 ROW 格式(MySQL8 默认)+demo 复制权限(已写入 init SQL，本次为运行时 GRANT 生效)。application.yml 的 cache 开关被本地改为 true(测试用)未纳入提交，仓库基线保持 false。
+
+## US-014 非核心逻辑异步化（@Async）开关 [2026-06-05] PASS
+做了什么：
+- 新增 config/AsyncConfig：@EnableAsync + @Bean("orderExecutor") ThreadPoolTaskExecutor(corePoolSize=4, maxPoolSize=8, queueCapacity=100, threadNamePrefix=order-async-, RejectedExecutionHandler=CallerRunsPolicy)。
+- 新增 service/NonCoreTaskService.runAsync(userId,orderNo,amount)：@Async("orderExecutor") 依次调 sms/email/points。单独成 bean——@Async 靠 Spring 代理生效，OrderService 内部自调用不会异步。
+- OrderService 注入 NonCoreTaskService；placeOrder 非核心段按 optimizeProperties.isAsync() 分流：true 调 nonCoreTaskService.runAsync(...) 主线程立即返回；false 保持 sms/email/points 同步(US-006 行为)。
+改动文件：config/AsyncConfig.java(新增)、service/NonCoreTaskService.java(新增)、service/OrderService.java(注入+分流)、docs/ASYNC.md(新增)、ralph/prd.json、ralph/progress.txt
+如何验证：
+- mvn -DskipTests compile 通过。
+- 下单 elapsedMs 实测(8081,sim-db-latency=0,POST /orders userId1/product7/qty1)：async=true 64(预热)/5/3ms；async=false 953/912/922ms(含 sms500+email300+points100 同步)。
+- async=true 日志：[ASYNC] 非核心任务进入线程池；[SMS]/[EMAIL]/[POINTS] 在 order-async-1/2/3 线程执行，主线程已返回。
+- 文档 docs/ASYNC.md：响应时间对比表、线程池参数与提交顺序(core→queue→max→拒绝)、拒绝策略 CallerRunsPolicy(调用方自己跑,背压不丢) vs AbortPolicy(抛异常需兜底) vs Discard*，局限(异步在事务提交前执行、@Async 吞异常进日志、进程内线程池重启丢任务→引出 US-015 MQ)。
+环境备注：验证用 8081 实例，async=true/false 各起一次，均验证毕 kill 清理；下单会真实扣 product7 库存(100w 余量充足)。

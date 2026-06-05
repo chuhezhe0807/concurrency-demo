@@ -204,8 +204,8 @@
         "Maven build 编译通过"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "新增 config/AsyncConfig(@EnableAsync + orderExecutor 线程池: core4/max8/queue100/前缀 order-async-/CallerRunsPolicy)。新增 service/NonCoreTaskService.runAsync(@Async(\"orderExecutor\"))依次跑 sms/email/points——单独成 bean 因 @Async 靠代理、同 bean 自调用不异步。OrderService 注入 NonCoreTaskService，placeOrder 按 optimizeProperties.isAsync() 分流：true 调 runAsync 立即返回，false 保持同步(US-006)。mvn compile 通过。实测(8081,sim-db-latency=0)下单 elapsedMs：async=false 953/912/922ms(含 sms500+email300+points100 同步) → async=true 64(预热)/5/3ms，非核心在 order-async-1/2/3 线程跑(日志[ASYNC]/[SMS]/[EMAIL]/[POINTS] 主线程已返回)。新增 docs/ASYNC.md(开关/代码/响应时间对比表/线程池参数/拒绝策略 CallerRunsPolicy vs AbortPolicy 对比/局限:异步在事务提交前执行、@Async吞异常、进程内线程池重启丢任务→引出 US-015 MQ)。"
     },
     {
       "id": "US-015",

@@ -38,6 +38,7 @@ public class OrderService {
     private final SmsService smsService;
     private final EmailService emailService;
     private final PointsService pointsService;
+    private final NonCoreTaskService nonCoreTaskService;
     private final ProductService productService;
     private final OptimizeProperties optimizeProperties;
 
@@ -48,6 +49,7 @@ public class OrderService {
                         SmsService smsService,
                         EmailService emailService,
                         PointsService pointsService,
+                        NonCoreTaskService nonCoreTaskService,
                         ProductService productService,
                         OptimizeProperties optimizeProperties) {
         this.orderMapper = orderMapper;
@@ -57,6 +59,7 @@ public class OrderService {
         this.smsService = smsService;
         this.emailService = emailService;
         this.pointsService = pointsService;
+        this.nonCoreTaskService = nonCoreTaskService;
         this.productService = productService;
         this.optimizeProperties = optimizeProperties;
     }
@@ -96,10 +99,16 @@ public class OrderService {
         order.setCreateTime(LocalDateTime.now());
         orderMapper.insert(order);
 
-        // 非核心：短信 + 邮件 + 积分，全部同步执行（拖慢响应）
-        smsService.send(req.getUserId(), order.getOrderNo());
-        emailService.send(req.getUserId(), order.getOrderNo());
-        pointsService.add(req.getUserId(), amount);
+        // 非核心：短信 + 邮件 + 积分。
+        // async=true 时丢入 orderExecutor 线程池，下单主线程不等它跑完即返回；
+        // false 时全部同步执行（US-006 行为，拖慢响应）。
+        if (optimizeProperties.isAsync()) {
+            nonCoreTaskService.runAsync(req.getUserId(), order.getOrderNo(), amount);
+        } else {
+            smsService.send(req.getUserId(), order.getOrderNo());
+            emailService.send(req.getUserId(), order.getOrderNo());
+            pointsService.add(req.getUserId(), amount);
+        }
 
         return new OrderResult(order.getId(), order.getOrderNo(), System.currentTimeMillis() - start);
     }
