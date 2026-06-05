@@ -100,3 +100,15 @@
 实测基线(本机 docker MySQL，未优化全开关 false)：1000 请求，吞吐 ~199 req/s，平均 28.7ms，TP90/95/99=42/47/58ms，错误率 0%。
 重要发现(已写入 BENCHMARK.md)：本机单次查询亚毫秒，61 次 N+1 累计也只 ~28ms，无法复现原文 4200ms/38rps/12%。记录的是真实测量值，未套用原文数字。影响：本机 N+1 优化绝对收益不如原文夸张，放大对比可在 Mapper 加人为延迟/增大 threads·loops·pageSize/关注相对提升。
 如何验证：jmeter -n -t ... -e -o report/ 跑完 summary=1000 in 5s 0 错误，statistics.json Total 取得指标。
+
+## US-008 增强：模拟 DB 延迟（方案1）[2026-06-05] PASS
+做了什么：
+- 新增 config/SimulatedLatencyInterceptor：MyBatis 拦截器，拦截 StatementHandler.query/update，在每条 SQL 执行前 sleep demo.sim-db-latency-ms 毫秒(默认 0 关闭)，@Component 自动注册到 SqlSessionFactory。延迟发生在连接占用期间，既放大 N+1 也能制造连接池争用(为 US-011 铺垫)。
+- application.yml 加 demo.sim-db-latency-ms: 5(基线开启 5ms)。
+- 更新 jmeter/BENCHMARK.md：补充模拟延迟说明，基线表改为 5ms 延迟下的实测值，并保留 0ms 纯本机参考值。
+重测基线(5ms 延迟，未优化)：吞吐 21.9 req/s，平均 7979ms，TP90/95/99=10346/10854/11851ms，错误率 0%。
+与原文量级一致(原文 38rps/4200ms)。错误率 0 因 Hikari 默认 30s 超时仍能完成；US-011 调小超时后会出现快速失败错误。
+参考：0ms 延迟纯本机基线 199 req/s / 28.7ms / TP99 58ms。
+如何验证：
+- mvn compile 通过；warmup 单请求从 0.27s 升到 0.77s(61×5ms+争用)。
+- jmeter 复跑 1000 请求 summary=21.9/s avg 7978ms，statistics.json 取得 TP99 11851ms。

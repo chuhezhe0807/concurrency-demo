@@ -117,7 +117,7 @@
       ],
       "priority": 8,
       "passes": true,
-      "notes": "order_list_test.jmx(200线程×5循环, 参数化 host/port/threads/loops) + BENCHMARK.md(运行命令/读报告/基线表/环境说明)。实测基线: 199 req/s, avg 28.7ms, TP99 58ms, 0% 错误。重要: 本机 docker MySQL 亚毫秒查询, 无法复现原文 4200ms/38rps/12%, 记录真实测量值未套原文数字; 放大对比需 Mapper 加延迟或增大压力。jmeter 产物已 gitignore。"
+      "notes": "order_list_test.jmx(200线程×5循环, 参数化 host/port/threads/loops) + BENCHMARK.md(运行命令/读报告/基线表/环境说明)。实测基线: 199 req/s, avg 28.7ms, TP99 58ms, 0% 错误。重要: 本机 docker MySQL 亚毫秒查询, 无法复现原文 4200ms/38rps/12%, 记录真实测量值未套原文数字; 放大对比需 Mapper 加延迟或增大压力。jmeter 产物已 gitignore。【增强·方案1】新增 SimulatedLatencyInterceptor(每条 SQL sleep demo.sim-db-latency-ms, 默认 5ms)模拟远程 DB 往返, 延迟在连接占用期间发生(为 US-011 铺垫)。5ms 延迟下重测基线: 21.9 req/s, avg 7979ms, TP99 11851ms, 0% 错误(与原文量级一致); 0ms 时退回 199rps/28.7ms。"
     },
     {
       "id": "US-009",

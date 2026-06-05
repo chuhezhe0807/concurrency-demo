@@ -40,8 +40,11 @@ mybatis-plus:
       logic-delete-value: 1
       logic-not-delete-value: 0
 
-# 优化开关脚手架（基线全部关闭，后续 story 逐个启用）
+# 模拟数据库网络往返延迟(毫秒)，每条 SQL 执行前 sleep。
+# 本机 MySQL 亚毫秒查询无法复现原文 N+1 累积延迟，注入此延迟放大对比；设 0 即关闭。
 demo:
+  sim-db-latency-ms: 5
+  # 优化开关脚手架（基线全部关闭，后续 story 逐个启用）
   optimize:
     batch-query: false
     hikari-tuning: false
