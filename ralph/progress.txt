@@ -234,3 +234,18 @@
 - Nacos API 确认注册：GET /nacos/v1/ns/service/list -> {"count":1,"doms":["gateway-service"]}；GET /nacos/v1/ns/instance/list?serviceName=gateway-service -> 实例 ip:8090 healthy=true ephemeral=true。
 - 网关端点：GET /actuator/gateway/routes -> [](空数组，因下游服务尚未注册，US-018/019 接入 product/order-service 后由 discovery locator 自动填充路由)；GET /actuator/health -> UP。
 环境备注：nacos v2.3.2 镜像本机已缓存(1.27GB)。验证毕 kill 8090 网关进程；nacos 容器作为基础设施保留运行(与 mysql/redis/rabbitmq 一致)。Java 21 用 /opt/homebrew/opt/openjdk@21。
+
+## US-018 阶段二：拆分商品服务为独立微服务 [2026-06-08] PASS（microservices 分支）
+做了什么：
+- 新增 product-service 子模块（root pom <modules> 增加 product-service），把单体里的商品逻辑拆为独立可部署微服务。
+- 模块结构：包 com.chuhezhe.product；ProductServiceApplication(@SpringBootApplication + @MapperScan("com.chuhezhe.product.mapper"))。pom 依赖 spring-boot-starter-web + spring-cloud-starter-alibaba-nacos-discovery + mybatis-plus-spring-boot3-starter + mysql-connector-j(runtime) + actuator + test。
+- entity/Product(@TableName t_product, @TableLogic deleted)、mapper/ProductMapper(BaseMapper)、service/ProductService(getById / updatePrice / deductStock——扣库存带 ge 库存充足条件的乐观更新，返回 boolean)、controller/ProductController(GET /products/{id}、PUT /products/{id}?price=、POST /products/{id}/deduct?quantity=)。拆分版刻意去掉单体的 Redis 缓存与一致性演示，聚焦微服务边界本身。
+- application.yml：server.port=8071、spring.application.name=product-service、spring.cloud.nacos.discovery.server-addr=localhost:8848、独立 datasource(同实例同库 concurrency_demo)、mybatis-plus 逻辑删除配置、暴露 health/info。
+- 附带修复 gateway-service：补 spring-cloud-starter-loadbalancer。US-017 时网关无下游服务、该缺口未暴露；路由到真实服务时 lb://product-service 因缺 LoadBalancer 返回 503（路由能生成但无可用实例），补依赖后恢复正常。
+改动文件：pom.xml(加 module)、product-service/pom.xml(新增)、product-service/src/main/java/com/chuhezhe/product/{ProductServiceApplication,entity/Product,mapper/ProductMapper,service/ProductService,controller/ProductController}.java(新增)、product-service/src/main/resources/application.yml(新增)、gateway-service/pom.xml(补 loadbalancer)、ralph/prd.json、ralph/progress.txt
+如何验证：
+- mvn -DskipTests compile：reactor 4 模块(concurrency-demo/concurrency-monolith/gateway-service/product-service) BUILD SUCCESS。
+- 启动 product-service(8071)：日志 "Tomcat started on port 8071" + "nacos registry, DEFAULT_GROUP product-service 192.168.50.9:8071 register finished" + "Started ProductServiceApplication"；Nacos GET /ns/service/list -> doms 含 product-service。
+- 直连实测：GET http://localhost:8071/products/7 -> {"id":7,"name":"product_7","price":17.99,"stock":...}；PUT /products/7?price=88.88 -> 1；POST /products/7/deduct?quantity=2 -> {"success":true,...}(stock 递减)。
+- 经网关(补 loadbalancer 重启后)：GET http://localhost:8090/product-service/products/7 返回商品 JSON；POST /product-service/products/7/deduct?quantity=1 -> success:true；/actuator/gateway/routes 显示 /product-service/** -> lb://product-service(healthy=true)。补 loadbalancer 前同样路由返回 503，印证根因。
+环境备注：依赖 docker mysql(3306)+nacos(8848)。验证毕 kill 网关与 product-service dev 进程、还原 product_7 价=17.99(stock 因 deduct 测试从 999991 递减若干，100w 余量充足未还原)；nacos 容器保留运行。Java 21 用 /opt/homebrew/opt/openjdk@21。

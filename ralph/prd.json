@@ -260,8 +260,8 @@
         "Maven build 编译通过"
       ],
       "priority": 18,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "新增 product-service 子模块（root pom modules 加 product-service）。独立 Spring Boot 应用：包 com.chuhezhe.product，ProductServiceApplication(@SpringBootApplication+@MapperScan)。依赖 web+mybatis-plus+mysql(runtime)+spring-cloud-starter-alibaba-nacos-discovery+actuator。独立连接 MySQL（与单体同实例同库 concurrency_demo，自己的数据源，application.yml 配 datasource+逻辑删除 deleted）。entity/Product(@TableName t_product,@TableLogic)、mapper/ProductMapper(BaseMapper)、service/ProductService(getById/updatePrice/deductStock 带库存充足乐观更新)、controller/ProductController(GET /products/{id}、PUT /products/{id}?price=、POST /products/{id}/deduct?quantity=)。拆分版去掉单体的 Redis 缓存/一致性演示，聚焦微服务边界。server.port=8071、spring.application.name=product-service、nacos server-addr=localhost:8848。【附带修复】给 gateway-service 补 spring-cloud-starter-loadbalancer：US-017 时无下游未暴露，lb:// 路由缺 LoadBalancer 会生成路由但转发 503；补后正常。如何验证：mvn -DskipTests compile 4 模块 BUILD SUCCESS；启动 product-service 注册成功(日志 'nacos registry ... product-service 192.168.50.9:8071 register finished')、Nacos service/list 含 product-service；直连实测 GET /products/7 返回商品 JSON、PUT 改价返回 1、POST deduct?quantity=2 返回 success:true(stock 递减)；经网关(补 loadbalancer 重启后)GET /product-service/products/7 与 POST /product-service/products/7/deduct 均 200 正常，/actuator/gateway/routes 显示 /product-service/**->lb://product-service。验证毕 kill 网关与 product-service dev 进程、还原 product_7 价=17.99，nacos 保留。"
     },
     {
       "id": "US-019",

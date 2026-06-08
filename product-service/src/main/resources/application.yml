@@ -1,0 +1,31 @@
+server:
+  port: 8071   # 商品微服务端口（monolith 8080 / gateway 8090 互不冲突）
+
+spring:
+  application:
+    name: product-service   # 注册到 Nacos 的服务名，网关按此 serviceId 路由
+  cloud:
+    nacos:
+      discovery:
+        server-addr: localhost:8848
+  datasource:
+    # 独立连接 MySQL（与单体同一实例同库 concurrency_demo，微服务各自持有自己的数据源）
+    url: jdbc:mysql://localhost:3306/concurrency_demo?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: demo
+    password: demo123
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
