@@ -79,6 +79,32 @@ CREATE TABLE undo_log (
   UNIQUE KEY ux_undo_log (xid, branch_id)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COMMENT='AT transaction mode undo table';
 
+-- ---------- 可靠消息最终一致（US-022） ----------
+-- 本地消息表（transactional outbox）：order-service 建订单时，把「待发的扣库存消息」与订单写进同一个本地事务，
+-- 消除「DB 写成功但消息没发出」的双写缺口。轮询器再把 NEW 消息可靠投递到 RabbitMQ，confirm 后置 SENT。
+DROP TABLE IF EXISTS t_order_outbox;
+CREATE TABLE t_order_outbox (
+  id          BIGINT       NOT NULL PRIMARY KEY,
+  order_no    VARCHAR(32)  NOT NULL,
+  payload     TEXT         NOT NULL COMMENT '扣库存消息 JSON',
+  status      TINYINT      NOT NULL DEFAULT 0 COMMENT '0=NEW 待发送, 1=SENT 已确认投递',
+  retry_count INT          NOT NULL DEFAULT 0,
+  create_time DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted     TINYINT      NOT NULL DEFAULT 0,
+  UNIQUE KEY uk_outbox_order_no (order_no),
+  KEY idx_outbox_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='本地消息表';
+
+-- product-service 幂等去重表：消费扣库存消息时，先以 order_no 占位（主键冲突=已处理过），保证重复投递只扣一次库存。
+DROP TABLE IF EXISTS t_stock_deduct_log;
+CREATE TABLE t_stock_deduct_log (
+  order_no    VARCHAR(32)  NOT NULL PRIMARY KEY,
+  product_id  BIGINT       NOT NULL,
+  quantity    INT          NOT NULL,
+  create_time DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='扣库存幂等去重表';
+
 -- ---------- 数字生成器（0-9 数字表，交叉连接得到序列） ----------
 -- 用普通表而非 TEMPORARY 表：MySQL 不允许在同一查询中多次引用同一 TEMPORARY 表
 DROP TABLE IF EXISTS digits;

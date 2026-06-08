@@ -1,9 +1,15 @@
 package com.chuhezhe.product.service;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.chuhezhe.product.dto.StockDeductMsg;
 import com.chuhezhe.product.entity.Product;
+import com.chuhezhe.product.entity.StockDeductLog;
 import com.chuhezhe.product.mapper.ProductMapper;
+import com.chuhezhe.product.mapper.StockDeductLogMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,7 +25,10 @@ import java.time.LocalDateTime;
 @Service
 public class ProductService {
 
+    private static final Logger log = LoggerFactory.getLogger(ProductService.class);
+
     private final ProductMapper productMapper;
+    private final StockDeductLogMapper deductLogMapper;
 
     /**
      * US-020 模拟每次查询的处理耗时（毫秒，默认 0 不生效）。代表慢下游/慢查询等阻塞型 I/O。
@@ -28,8 +37,9 @@ public class ProductService {
     @Value("${demo.product.process-latency-ms:0}")
     private long processLatencyMs;
 
-    public ProductService(ProductMapper productMapper) {
+    public ProductService(ProductMapper productMapper, StockDeductLogMapper deductLogMapper) {
         this.productMapper = productMapper;
+        this.deductLogMapper = deductLogMapper;
     }
 
     public Product getById(Long id) {
@@ -68,5 +78,37 @@ public class ProductService {
                 .eq(Product::getId, id)
                 .ge(Product::getStock, quantity));
         return updated > 0;
+    }
+
+    /** 扣库存结果：success=是否扣减成功，reason=失败/重复原因。 */
+    public record DeductOutcome(boolean success, String reason) {
+    }
+
+    /**
+     * US-022 可靠消息消费端的幂等扣库存。与去重表写在同一事务里：
+     * <ol>
+     *   <li>先 insert 幂等表（order_no 主键）。主键冲突=这条消息处理过了 → 直接返回成功，不重复扣减
+     *       （应对消息「至少一次」重投）。</li>
+     *   <li>未冲突则执行扣库存：库存充足返回成功，不足返回失败（业务结果，非异常，照常提交去重记录避免无谓重试）。</li>
+     * </ol>
+     * 若过程抛异常，事务回滚（连同去重记录），消息 nack 后可被重新处理。
+     */
+    @Transactional
+    public DeductOutcome deductForOrder(StockDeductMsg msg) {
+        try {
+            deductLogMapper.insert(new StockDeductLog(msg.getOrderNo(), msg.getProductId(), msg.getQuantity()));
+        } catch (DuplicateKeyException dup) {
+            log.info("[STOCK] 消息已处理过，幂等跳过 orderNo={}", msg.getOrderNo());
+            return new DeductOutcome(true, "duplicate-already-processed");
+        }
+        boolean ok = deductStock(msg.getProductId(), msg.getQuantity());
+        if (ok) {
+            log.info("[STOCK] 扣库存成功 orderNo={} productId={} qty={}",
+                    msg.getOrderNo(), msg.getProductId(), msg.getQuantity());
+            return new DeductOutcome(true, "ok");
+        }
+        log.warn("[STOCK] 库存不足，扣减失败 orderNo={} productId={} qty={}",
+                msg.getOrderNo(), msg.getProductId(), msg.getQuantity());
+        return new DeductOutcome(false, "库存不足");
     }
 }

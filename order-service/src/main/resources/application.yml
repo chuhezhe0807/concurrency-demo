@@ -14,6 +14,17 @@ spring:
     username: demo
     password: demo123
     driver-class-name: com.mysql.cj.jdbc.Driver
+  # RabbitMQ 可靠消息（US-022）。三层防丢之二、之三：
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    publisher-confirm-type: correlated   # publisher confirm：异步确认 broker 是否真正收下消息（outbox 收到 ack 才置 SENT）
+    publisher-returns: true              # return 回调：消息无法路由到队列时退回并告警
+    listener:
+      simple:
+        acknowledge-mode: manual         # 手动 ack：消费成功才确认，处理中崩溃则消息重投不丢
 
 mybatis-plus:
   configuration:

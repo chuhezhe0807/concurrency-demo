@@ -14,6 +14,15 @@ spring:
     username: demo
     password: demo123
     driver-class-name: com.mysql.cj.jdbc.Driver
+  # RabbitMQ 可靠消息（US-022）。消费扣库存消息，手动 ack 保证处理成功才确认。
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    listener:
+      simple:
+        acknowledge-mode: manual   # 手动 ack：扣库存+回传成功才确认，处理中崩溃则消息重投不丢
 
 mybatis-plus:
   configuration:
