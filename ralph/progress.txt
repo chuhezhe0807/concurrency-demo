@@ -205,3 +205,15 @@
 - rabbitmqctl list_queues：order.non-core.queue durable=true、messages=0(消费 ack 后归零)。
 - Redis：消费后出现幂等键 order:processed:ORD...（验证毕已 DEL 清理）。
 环境备注：docker rabbitmq:3.13-management(5672/15672)healthy。验证用 8081 实例避开 8080，验证毕已 kill；下单真实扣 product7 库存(100w 余量充足)。仓库基线 application.yml mq 仍为 false。
+
+## US-016 阶段一汇总对比教程文档 [2026-06-08] PASS
+做了什么：
+- 纯文档，无代码改动。新增 docs/STAGE1-SUMMARY.md，把 US-005~US-015 串成一条完整优化曲线。
+- 第0节点明阶段一是两条独立优化线：读路径(GET /orders，N+1→批量→连接池→缓存)与写路径(POST /orders，同步→@Async→MQ)，并诚实说明本机亚毫秒查询无法复现原文，靠 sim-db-latency-ms=5 放大，下文数字均为该前提下真实实测(非照抄原文)。
+- 起点诊断(US-005 N+1 61次/US-008 基线表/US-009 Arthas 反直觉结论)。
+- 读路径三阶段(R1 批量 21.9→194.3rps/R2 连接池 21.9→69.7rps/R3 缓存 单请求0.487→0.145s、往返61→41)，写路径两阶段(W1 @Async 下单912→5ms/W2 MQ 立即返回65ms)，每段含开关、压测命令、前后对比表、面试知识点，并交叉链接 ARTHAS/HIKARICP/CACHE-CONSISTENCY/ASYNC/MQ.md。
+- 第4节给出按阶段逐个打开开关复现整条曲线的命令序列(含⑤读路径全开组合)，诚实标注组合最优值未单独压测、留作复现，未编造 500+ 终点数字(仅作为原文叙事目标标注)。
+- 第5节一页速查表。
+改动文件：docs/STAGE1-SUMMARY.md(新增)、ralph/prd.json、ralph/progress.txt
+数字来源：jmeter/BENCHMARK.md(US-008/010/011/012 实测表) + US-014/015 progress 实测，全部为既有实测值的汇总，本 story 未新跑压测。
+如何验证：本 story 为文档汇总，不纳入自动化验证；文档内所有数字与 BENCHMARK.md 及各 US progress 记录一致，开关名/接口/命令与源码一致，交叉链接路径有效(docs/ 同级 + ../jmeter/BENCHMARK.md)。

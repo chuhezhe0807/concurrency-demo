@@ -232,8 +232,8 @@
         "说明如何按阶段逐个打开开关复现整条优化曲线"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "纯文档（汇总，无代码改动）。新增 docs/STAGE1-SUMMARY.md，把 US-005~US-015 串成完整优化曲线。要点：①点明阶段一其实是两条独立优化线——读路径(GET /orders: batch-query→hikari-tuning→cache)与写路径(POST /orders: async→mq)，数字不可混；②诚实区分『原文叙事曲线 38rps/4200ms/12%→500+/80/0』与『本项目 5ms sim-latency 下真实实测值』，沿用项目不编造数字的惯例；③每阶段列出 开关/压测命令/前后对比表/面试知识点，数字全部取自 BENCHMARK.md 与各 US progress 实测(基线21.9rps→批量194.3rps→连接池69.7rps；缓存单请求0.487s→0.145s；下单912ms→5ms→mq立即返回65ms)；④给出按阶段逐个打开开关复现整条曲线的命令序列(含读路径全开组合)，并诚实标注组合最优值未单独压测、留作复现；⑤交叉链接 ARTHAS/HIKARICP/CACHE-CONSISTENCY/ASYNC/MQ.md 与 jmeter/BENCHMARK.md；末尾一页速查表。"
     },
     {
       "id": "US-017",
