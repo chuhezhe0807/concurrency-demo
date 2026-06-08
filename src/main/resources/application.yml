@@ -32,6 +32,12 @@ spring:
     port: 5672
     username: guest
     password: guest
+    # US-015 消息防丢三层保障之二、之三（持久化在 RabbitConfig 里声明 durable 队列/交换机）：
+    publisher-confirm-type: correlated   # 开启 publisher confirm：异步确认 broker 是否真正收下消息
+    publisher-returns: true              # 开启 return 回调：消息无法路由到队列时退回并告警
+    listener:
+      simple:
+        acknowledge-mode: manual         # 手动 ack：消费成功才确认，处理中崩溃则消息重投不丢
 
 mybatis-plus:
   configuration:

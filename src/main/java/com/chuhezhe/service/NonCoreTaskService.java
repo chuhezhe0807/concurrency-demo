@@ -32,8 +32,9 @@ public class NonCoreTaskService {
         this.pointsService = pointsService;
     }
 
+    // condition：mq 开关开启时让位给 RabbitMQ（OrderMqPublisher），避免同一事件既走线程池又走 MQ 重复处理。
     @Async("orderExecutor")
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, condition = "!@optimizeProperties.mq")
     public void onOrderPlaced(OrderPlacedEvent event) {
         log.info("[ASYNC] 事务已提交，非核心任务进入线程池执行 orderNo={}", event.orderNo());
         smsService.send(event.userId(), event.orderNo());

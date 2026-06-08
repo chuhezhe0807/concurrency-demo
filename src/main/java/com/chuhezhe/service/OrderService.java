@@ -102,10 +102,12 @@ public class OrderService {
         orderMapper.insert(order);
 
         // 非核心：短信 + 邮件 + 积分。
-        // async=true 时发布 OrderPlacedEvent，由 @TransactionalEventListener(AFTER_COMMIT) 在事务
-        // 提交后才丢入 orderExecutor 线程池执行——核心若回滚则事件不投递，不会误发通知；
-        // false 时全部同步执行（US-006 行为，拖慢响应）。
-        if (optimizeProperties.isAsync()) {
+        // mq=true（US-015）或 async=true（US-014）时发布 OrderPlacedEvent，由
+        // @TransactionalEventListener(AFTER_COMMIT) 在事务提交后才消费——核心若回滚则事件不投递，不会误发：
+        //   · mq=true  -> OrderMqPublisher 投递到 RabbitMQ，独立消费者处理（任务可持久化、不丢）；
+        //   · 否则 async=true -> NonCoreTaskService 丢入 orderExecutor 线程池处理（进程内、重启丢任务）。
+        // 两者都关时全部同步执行（US-006 行为，拖慢响应）。
+        if (optimizeProperties.isMq() || optimizeProperties.isAsync()) {
             eventPublisher.publishEvent(new OrderPlacedEvent(req.getUserId(), order.getOrderNo(), amount));
         } else {
             smsService.send(req.getUserId(), order.getOrderNo());

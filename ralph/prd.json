@@ -219,8 +219,8 @@
         "Maven build 编译通过"
       ],
       "priority": 15,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "复用 US-014 的 OrderPlacedEvent + AFTER_COMMIT 事件机制，mq 优先于 async。新增 config/RabbitConfig(@ConditionalOnProperty demo.optimize.mq=true：durable 队列 order.non-core.queue + durable DirectExchange order.exchange + 绑定 order.placed、Jackson2JsonMessageConverter、带 confirm/returns 回调且 mandatory=true 的 RabbitTemplate)。新增 service/OrderMqPublisher(@TransactionalEventListener AFTER_COMMIT，事务提交后 convertAndSend 投递，correlationId=orderNo)。新增 service/OrderTaskConsumer(@RabbitListener 手动 ack：成功 basicAck、异常 basicNack(requeue=false) 防毒消息；以 orderNo 做 Redis SETNX 幂等)。NonCoreTaskService.onOrderPlaced 加 condition=\"!@optimizeProperties.mq\" 让位给 MQ，避免同事件双处理。OrderService.placeOrder 改为 mq||async 时发事件。application.yml rabbitmq 加 publisher-confirm-type=correlated + publisher-returns=true + listener.simple.acknowledge-mode=manual。三层防丢=publisher confirm+持久化(durable+PERSISTENT)+手动 ack，幂等=Redis SETNX。mvn compile 通过。运行时实测(8081,mq=true,latency=0)：下单 elapsedMs=65 立即返回，日志链路 [MQ]投递→[MQ-CONFIRM]broker确认→[MQ-CONSUME]消费线程跑 SMS/EMAIL/POINTS→ack；rabbitmqctl 显示 order.non-core.queue durable=true messages=0；Redis 出现 order:processed:ORD... 幂等键。文档 docs/MQ.md(为何替代@Async/开关与结构/三层防丢表/nack与DLQ/幂等设计/实测/与@Async对比)。依赖 docker rabbitmq(5672)已 healthy。"
     },
     {
       "id": "US-016",

@@ -187,3 +187,21 @@
 - async=true 日志：[ASYNC] 非核心任务进入线程池；[SMS]/[EMAIL]/[POINTS] 在 order-async-1/2/3 线程执行，主线程已返回。
 - 文档 docs/ASYNC.md：响应时间对比表、线程池参数与提交顺序(core→queue→max→拒绝)、拒绝策略 CallerRunsPolicy(调用方自己跑,背压不丢) vs AbortPolicy(抛异常需兜底) vs Discard*，局限(异步在事务提交前执行、@Async 吞异常进日志、进程内线程池重启丢任务→引出 US-015 MQ)。
 环境备注：验证用 8081 实例，async=true/false 各起一次，均验证毕 kill 清理；下单会真实扣 product7 库存(100w 余量充足)。
+
+## US-015 RabbitMQ 替代 @Async 开关 [2026-06-08] PASS
+做了什么：
+- 复用 US-014 的 OrderPlacedEvent + @TransactionalEventListener(AFTER_COMMIT) 事件机制，把非核心任务的落点从「进程内线程池」换成「RabbitMQ broker」；mq 开关优先级高于 async。
+- 新增 config/RabbitConfig（@ConditionalOnProperty demo.optimize.mq=true，关闭时不加载、基线无需 RabbitMQ 即可启动）：durable 队列 order.non-core.queue + durable DirectExchange order.exchange + 绑定键 order.placed；Jackson2JsonMessageConverter(消息体 JSON)；自定义 RabbitTemplate 设 mandatory=true + ConfirmCallback([MQ-CONFIRM]) + ReturnsCallback([MQ-RETURN])。
+- 新增 service/OrderMqPublisher（@ConditionalOnProperty mq=true）：@TransactionalEventListener(AFTER_COMMIT) 在事务提交后 convertAndSend 投递事件，correlationId=orderNo（confirm 与下游幂等都以它为准）。
+- 新增 service/OrderTaskConsumer（@ConditionalOnProperty mq=true）：@RabbitListener 手动 ack——业务成功 basicAck、异常 basicNack(requeue=false) 防毒消息无限重投(生产应投 DLQ)；消费前用 Redis SETNX(order:processed:{orderNo}, TTL 1h) 做幂等，已处理过则直接 ack 跳过。
+- NonCoreTaskService.onOrderPlaced 加 condition="!@optimizeProperties.mq"：mq 开启时让位给 MQ，避免同一 OrderPlacedEvent 既走线程池又走 MQ 重复处理。
+- OrderService.placeOrder：非核心段改为 mq||async 时 publishEvent，两者都关时同步执行(US-006)。
+- application.yml rabbitmq 段加 publisher-confirm-type=correlated + publisher-returns=true + listener.simple.acknowledge-mode=manual。
+改动文件：config/RabbitConfig.java(新增)、service/OrderMqPublisher.java(新增)、service/OrderTaskConsumer.java(新增)、service/NonCoreTaskService.java(加 condition)、service/OrderService.java(分流改 mq||async)、src/main/resources/application.yml(rabbitmq confirm/manual ack)、docs/MQ.md(新增)、ralph/prd.json、ralph/progress.txt
+消息防丢三层(均已实现且实测)：①publisher confirm(correlated + ConfirmCallback) ②持久化(queue/exchange durable=true + JSON 默认 PERSISTENT 落盘) ③手动 ack(消费成功才 basicAck，未 ack 重投)。幂等：Redis SETNX 以 orderNo 为键。
+如何验证：
+- mvn -DskipTests compile 通过(JAVA_HOME=/opt/homebrew/opt/openjdk@21)。
+- 运行时(8081, mq=true, async=false, sim-db-latency=0)：启动日志连上 RabbitMQ(localhost:5672)、开关 mq=true；POST /orders 返回 elapsedMs=65 主线程立即返回；日志链路完整——[nio-8081]OrderMqPublisher 投递→[nectionFactory2][MQ-CONFIRM] broker 已确认→[ntContainer#0-1][MQ-CONSUME] 消费线程跑 SMS(500ms)/EMAIL/POINTS→处理完成并 ack。
+- rabbitmqctl list_queues：order.non-core.queue durable=true、messages=0(消费 ack 后归零)。
+- Redis：消费后出现幂等键 order:processed:ORD...（验证毕已 DEL 清理）。
+环境备注：docker rabbitmq:3.13-management(5672/15672)healthy。验证用 8081 实例避开 8080，验证毕已 kill；下单真实扣 product7 库存(100w 余量充足)。仓库基线 application.yml mq 仍为 false。
