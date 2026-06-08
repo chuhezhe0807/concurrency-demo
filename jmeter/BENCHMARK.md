@@ -159,3 +159,33 @@ cd jmeter && jmeter -n -t order_list_test.jmx -l result.jtl -e -o report/
 ```
 
 依赖：需 docker-compose 中的 Redis（宿主机端口 6380）。`docker exec concurrency-demo-redis redis-cli` 可观察缓存。
+
+## US-020 横向扩容：单实例 vs 双实例（product-service）
+
+阶段二对热点的 `product-service` 横向扩容：mvn 多进程同服务名（不同端口）注册 Nacos，
+网关经 Spring Cloud LoadBalancer 轮询分发。脚本 `product_scale_test.jmx` 经网关压
+`GET /product-service/products/7`，每实例 `--demo.product.process-latency-ms=100`（模拟阻塞 I/O）
++ `--server.tomcat.threads.max=50`（钉死单实例吞吐天花板 ≈ 50/0.1s = 500 req/s）。
+两次压测客户端负载完全一致（200 线程 × 80 循环 = 16000 请求），唯一变量是后端实例数。
+
+| 指标 | 单实例(8071) | 双实例(8071+8072) | 变化 |
+|------|--------------|-------------------|------|
+| 吞吐量 throughput | 464.1 req/s | 853.8 req/s | ↑ 1.84× |
+| 平均响应 avg | 372.5 ms | 177.6 ms | ↓ 52% |
+| TP90 | 426 ms | 215 ms | ↓ 50% |
+| TP95 | 433 ms | 221 ms | ↓ 49% |
+| TP99 | 587 ms | 235 ms | ↓ 60% |
+| 错误率 | 0% | 0% | — |
+
+负载均衡分发证据：双实例压测中采样网关到两实例的 ESTABLISHED 连接 8071⇒150 / 8072⇒148，近完美轮询。
+
+运行命令：
+```bash
+cd jmeter
+# 单实例（只起 8071+网关，等 LB 只剩 1 实例）
+jmeter -n -t product_scale_test.jmx -Jthreads=200 -Jloops=80 -l result_single.jtl -e -o report_single
+# 双实例（加起 8072，等 LB 收到 2 实例）
+jmeter -n -t product_scale_test.jmx -Jthreads=200 -Jloops=80 -l result_multi.jtl -e -o report_multi
+```
+
+扩容前提（无状态 + 共享 MySQL/Redis）与瓶颈下移到数据库的分析见 [../docs/SCALING.md](../docs/SCALING.md)。

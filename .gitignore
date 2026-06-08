@@ -41,6 +41,10 @@ build/
 ### JMeter 生成产物 ###
 jmeter/result.jtl
 jmeter/report/
+jmeter/result_single.jtl
+jmeter/result_multi.jtl
+jmeter/report_single/
+jmeter/report_multi/
 jmeter.log
 
 ### Arthas 诊断工具（外部下载，不入库） ###

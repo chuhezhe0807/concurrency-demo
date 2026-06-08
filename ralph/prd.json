@@ -289,8 +289,8 @@
         "文档说明横向扩容前提（服务无状态、共享 Redis/MySQL）与瓶颈下移到数据库的现象"
       ],
       "priority": 20,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "对热点 product-service 横向扩容(扩容方式=mvn 多进程同服务名不同端口，沿用阶段二 spring-boot:run 习惯，放弃 docker 多容器因本机无 Java21 JRE 镜像)。为在单机可复现地打出瓶颈：ProductService.getById 加 @Value demo.product.process-latency-ms(默认0)模拟阻塞 I/O，配每实例 server.tomcat.threads.max=50 钉死单实例吞吐天花板≈50/0.1s=500rps。两实例(8071/8072)各 --server.port + --demo.product.process-latency-ms=100 + --tomcat.threads.max=50 启动，同以 spring.application.name=product-service 注册 Nacos，网关 Spring Cloud LoadBalancer 自动轮询(无代码/网络改造)。脚本 jmeter/product_scale_test.jmx 经网关压 GET /product-service/products/7。如何验证：mvn -DskipTests compile 5 模块 BUILD SUCCESS；Nacos instance/list 含 8071+8072 两 healthy 实例；压测均 200 线程×80 循环=16000 请求(客户端负载一致,唯一变量实例数)，单实例 464.1rps/avg372.5/TP90-95-99=426/433/587/0% → 双实例 853.8rps/avg177.6/TP90-95-99=215/221/235/0%，吞吐↑1.84×(接近线性,非精确2×因客户端固定200并发+网关转发开销)、avg↓52%、TP99↓60%；负载均衡分发证据=压测中网关到两实例 ESTABLISHED 连接 8071⇒150/8072⇒148 近完美轮询。文档 docs/SCALING.md(为何单实例先到瓶颈+mvn多进程扩容方式+压测对比表+扩容前提:服务无状态&共享MySQL/Redis+瓶颈下移到数据库:加实例扩应用层线程,但N实例×Hikari10连接共享同一MySQL,应用层不再瓶颈后压力下沉到库的连接/CPU/行锁,本演示瓶颈刻意设在应用层故未触达,应对=Redis缓存挡库/读写分离/连接池调优)+BENCHMARK.md 加 US-020 对比表。LB 实例缓存约35s刷新,加/减实例后压测前先 warmup 确认0错误(实测停实例2后等35s warmup 30次0非200)。jmeter 新产物 result_single/multi.jtl 与 report_single/multi 已加入 .gitignore。环境:docker mysql(3306)+nacos(8848)healthy;验证毕 kill 8071/8072/8090 dev 进程,nacos/docker 基础设施保留。Java21=/opt/homebrew/opt/openjdk@21。"
     },
     {
       "id": "US-021",

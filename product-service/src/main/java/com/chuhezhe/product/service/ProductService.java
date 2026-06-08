@@ -3,6 +3,7 @@ package com.chuhezhe.product.service;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.chuhezhe.product.entity.Product;
 import com.chuhezhe.product.mapper.ProductMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -19,11 +20,25 @@ public class ProductService {
 
     private final ProductMapper productMapper;
 
+    /**
+     * US-020 模拟每次查询的处理耗时（毫秒，默认 0 不生效）。代表慢下游/慢查询等阻塞型 I/O。
+     * 配合限制 Tomcat 线程数，可让「单实例并发上限」成为瓶颈，从而在单机上直观演示横向扩容收益。
+     */
+    @Value("${demo.product.process-latency-ms:0}")
+    private long processLatencyMs;
+
     public ProductService(ProductMapper productMapper) {
         this.productMapper = productMapper;
     }
 
     public Product getById(Long id) {
+        if (processLatencyMs > 0) {
+            try {
+                Thread.sleep(processLatencyMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
         return productMapper.selectById(id);
     }
 
