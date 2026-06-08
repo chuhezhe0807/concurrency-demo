@@ -249,3 +249,22 @@
 - 直连实测：GET http://localhost:8071/products/7 -> {"id":7,"name":"product_7","price":17.99,"stock":...}；PUT /products/7?price=88.88 -> 1；POST /products/7/deduct?quantity=2 -> {"success":true,...}(stock 递减)。
 - 经网关(补 loadbalancer 重启后)：GET http://localhost:8090/product-service/products/7 返回商品 JSON；POST /product-service/products/7/deduct?quantity=1 -> success:true；/actuator/gateway/routes 显示 /product-service/** -> lb://product-service(healthy=true)。补 loadbalancer 前同样路由返回 503，印证根因。
 环境备注：依赖 docker mysql(3306)+nacos(8848)。验证毕 kill 网关与 product-service dev 进程、还原 product_7 价=17.99(stock 因 deduct 测试从 999991 递减若干，100w 余量充足未还原)；nacos 容器保留运行。Java 21 用 /opt/homebrew/opt/openjdk@21。
+
+## US-019 阶段二：拆分订单服务并通过 Feign 调用商品服务 [2026-06-08] PASS（microservices 分支）
+做了什么：
+- 新增 order-service 子模块（root pom <modules> 加 order-service）。包 com.chuhezhe.order；OrderServiceApplication(@SpringBootApplication + @EnableFeignClients + @MapperScan("com.chuhezhe.order.mapper"))。
+- pom 依赖：web + spring-cloud-starter-alibaba-nacos-discovery + spring-cloud-starter-openfeign + spring-cloud-starter-loadbalancer（Feign 按服务名 lb://product-service 调用需 LoadBalancer 解析实例）+ mybatis-plus + mysql(runtime) + actuator + test。
+- entity/Order(@TableName t_order, @TableLogic)、mapper/OrderMapper(BaseMapper)；dto：CreateOrderRequest、OrderResult、ProductDTO(Feign 取商品的响应映射)、DeductResult(扣库存响应映射)。
+- client/ProductClient：@FeignClient(name="product-service")，声明 GET /products/{id} -> ProductDTO 与 POST /products/{id}/deduct?quantity= -> DeductResult，方法签名与 product-service Controller 一一对应。
+- service/OrderService.placeOrder(@Transactional)：①Feign getById 取单价(商品不存在则中止)②Feign deductStock 扣库存(success=false 则抛库存不足)③本地 insert 建订单(orderNo 用时间戳+随机)。刻意在第③步上方注释跨服务一致性缺口：本地事务只回滚 t_order，第②步已在 product 库 commit 的扣库存回不来→库存扣空却无订单，留给 US-021(Seata)/US-022(可靠消息)。
+- controller POST /orders；application.yml：server.port=8072、name=order-service、nacos server-addr、独立 datasource(t_order)、逻辑删除。
+改动文件：pom.xml(加 module)、order-service/pom.xml(新增)、order-service/src/main/java/com/chuhezhe/order/{OrderServiceApplication,entity/Order,mapper/OrderMapper,dto/{CreateOrderRequest,OrderResult,ProductDTO,DeductResult},client/ProductClient,service/OrderService,controller/OrderController}.java(新增)、order-service/src/main/resources/application.yml(新增)、docs/MICROSERVICES.md(新增)、ralph/prd.json、ralph/progress.txt
+如何验证：
+- mvn -DskipTests compile：reactor 5 模块 BUILD SUCCESS（concurrency-demo/concurrency-monolith/gateway-service/product-service/order-service）。
+- 启动 product(8071)+order(8072)+gateway(8090)：Nacos GET /ns/service/list -> {"count":3,"doms":["product-service","gateway-service","order-service"]}。
+- 经网关跨服务下单：POST http://localhost:8090/order-service/orders -d '{"userId":1,"productId":7,"quantity":3}' -> {"orderId":...,"orderNo":"ORD...","elapsedMs":165}。
+- 库存核对(经网关查 product-service)：下单前 stock=999988 -> 下单后 999985（精确扣 3，证明 order-service 经 Feign 跨服务调 product-service 扣库存）。
+- order-service 日志："[ORDER] 跨服务下单成功 orderNo=... productId=7 qty=3 amount=53.97"(17.99×3) + Feign "For 'product-service' URL not provided. Will try picking an instance via load-balancing."。
+- 失败路径：quantity=99999999 经网关下单 -> HTTP 500（库存不足 IllegalStateException 传播；demo 无全局异常处理器，可接受），下单中止不建单。
+- 文档 docs/MICROSERVICES.md：拓扑图、拆分边界(业务能力+数据所有权、一服务一份数据、只有 product-service 碰 t_product)、新问题(网络调用慢/不可靠→超时重试幂等熔断；数据一致性→本地事务管不到远程的回滚缺口 + Seata/可靠消息两解法表 + 对应 US-021/022)、复现命令。
+环境备注：依赖 docker mysql(3306)+nacos(8848)。验证毕 kill 8090/8072/8071 dev 进程；nacos 容器保留。product_7 库存因测试递减(100w 余量充足，未还原)。Java 21 用 /opt/homebrew/opt/openjdk@21。

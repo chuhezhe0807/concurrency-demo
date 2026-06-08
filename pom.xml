@@ -24,6 +24,7 @@
         <module>concurrency-monolith</module>
         <module>gateway-service</module>
         <module>product-service</module>
+        <module>order-service</module>
     </modules>
 
     <properties>

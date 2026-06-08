@@ -275,8 +275,8 @@
         "Maven build 编译通过"
       ],
       "priority": 19,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "新增 order-service 子模块（root pom modules 加 order-service）。包 com.chuhezhe.order，OrderServiceApplication(@SpringBootApplication+@EnableFeignClients+@MapperScan)。pom 依赖 web+nacos-discovery+spring-cloud-starter-openfeign+spring-cloud-starter-loadbalancer(Feign 按服务名调用需 LB 解析实例)+mybatis-plus+mysql+actuator。entity/Order(t_order,@TableLogic)、mapper/OrderMapper、dto(CreateOrderRequest/OrderResult/ProductDTO/DeductResult)、client/ProductClient(@FeignClient name=product-service：GET /products/{id}->ProductDTO、POST /products/{id}/deduct->DeductResult)、service/OrderService.placeOrder(@Transactional：Feign 取商品单价→Feign 扣库存(失败则中止)→建订单 insert)、controller POST /orders。server.port=8072、name=order-service、nacos+独立 datasource(t_order)。刻意保留并注释跨服务一致性缺口：本地 @Transactional 只回滚 t_order，扣库存已在 product 库 commit→若建单失败库存扣空无单，留给 US-021(Seata)/US-022(可靠消息)。如何验证：mvn -DskipTests compile 5 模块 BUILD SUCCESS；启动 product(8071)+order(8072)+gateway(8090)，Nacos service/list count=3[product-service,gateway-service,order-service]；经网关跨服务下单 POST http://localhost:8090/order-service/orders {userId1,productId7,qty3} -> {orderId,orderNo,elapsedMs=165}；product_7 库存 999988->999985(经 Feign 扣 3)；order 日志 '[ORDER] 跨服务下单成功 orderNo=... amount=53.97'(17.99×3) + Feign 'product-service URL not provided. Will try picking an instance via load-balancing'；库存不足(qty 超大)下单中止返回 HTTP 500(IllegalStateException 传播，无全局异常处理器，demo 可接受)。文档 docs/MICROSERVICES.md(拓扑图+拆分边界(业务能力+数据所有权,一服务一份数据,只有 product-service 碰 t_product)+新问题(网络调用慢/不可靠/超时重试幂等熔断；数据一致性 本地事务管不到远程的回滚缺口及 Seata/可靠消息两解法表)+复现命令)。验证毕 kill 8090/8072/8071 dev 进程，nacos 保留。"
     },
     {
       "id": "US-020",

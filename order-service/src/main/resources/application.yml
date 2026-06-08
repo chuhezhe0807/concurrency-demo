@@ -1,0 +1,31 @@
+server:
+  port: 8072   # 订单微服务端口（monolith 8080 / gateway 8090 / product 8071 互不冲突）
+
+spring:
+  application:
+    name: order-service   # 注册到 Nacos 的服务名，网关按此 serviceId 路由
+  cloud:
+    nacos:
+      discovery:
+        server-addr: localhost:8848
+  datasource:
+    # 独立连接 MySQL（t_order 表）。库存归 product-service 管，订单服务不直接读写商品表。
+    url: jdbc:mysql://localhost:3306/concurrency_demo?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: demo
+    password: demo123
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
