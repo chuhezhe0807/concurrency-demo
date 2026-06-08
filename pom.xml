@@ -14,62 +14,45 @@
     <groupId>com.chuhezhe</groupId>
     <artifactId>concurrency-demo</artifactId>
     <version>1.0-SNAPSHOT</version>
+    <!-- 阶段二起改为多模块 reactor：本 pom 仅做聚合与版本管理（packaging=pom）。
+         · concurrency-monolith：阶段一单体（保留作对照）
+         · gateway-service：阶段二 Spring Cloud Gateway 网关（US-017）
+         后续 US-018/019 再加 product-service / order-service 子模块。 -->
+    <packaging>pom</packaging>
+
+    <modules>
+        <module>concurrency-monolith</module>
+        <module>gateway-service</module>
+    </modules>
 
     <properties>
         <java.version>21</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <mybatis-plus.version>3.5.7</mybatis-plus.version>
+        <!-- Spring Boot 3.3.x 对应 Spring Cloud 2023.0.x(Leyton) 与 Spring Cloud Alibaba 2023.0.1.x -->
+        <spring-cloud.version>2023.0.3</spring-cloud.version>
+        <spring-cloud-alibaba.version>2023.0.1.3</spring-cloud-alibaba.version>
     </properties>
 
-    <dependencies>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-cache</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-redis</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-amqp</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>com.baomidou</groupId>
-            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
-            <version>${mybatis-plus.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.mysql</groupId>
-            <artifactId>mysql-connector-j</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-        <!-- 纯 Java binlog 监听（US-013 方案二：订阅 binlog 删缓存，简化版 Canal） -->
-        <dependency>
-            <groupId>com.zendesk</groupId>
-            <artifactId>mysql-binlog-connector-java</artifactId>
-            <version>0.29.2</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
-
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-            </plugin>
-        </plugins>
-    </build>
+    <dependencyManagement>
+        <dependencies>
+            <!-- Spring Cloud BOM：统一管理 gateway 等组件版本 -->
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Spring Cloud Alibaba BOM：统一管理 Nacos 注册/配置等组件版本 -->
+            <dependency>
+                <groupId>com.alibaba.cloud</groupId>
+                <artifactId>spring-cloud-alibaba-dependencies</artifactId>
+                <version>${spring-cloud-alibaba.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
 </project>

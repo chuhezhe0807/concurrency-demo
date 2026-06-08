@@ -9,8 +9,10 @@
 docker-compose up -d mysql redis
 
 # 2. 启动应用（需 Java 21）
+# 注：US-017 起项目改为多模块 reactor，单体已迁入 concurrency-monolith 模块，
+#     需用 -pl concurrency-monolith 指定模块运行（在仓库根目录执行）。
 JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home \
-  mvn -DskipTests spring-boot:run
+  mvn -DskipTests -pl concurrency-monolith spring-boot:run
 
 # 3. 跑压测并生成 HTML 报告
 cd jmeter
@@ -81,7 +83,7 @@ HikariCP 默认 connection-timeout 为 30s，请求虽慢但仍在超时内完�
 ```bash
 # 优化后实例（开关打开 + 5ms 延迟）
 JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home \
-  mvn -DskipTests spring-boot:run \
+  mvn -DskipTests -pl concurrency-monolith spring-boot:run \
   -Dspring-boot.run.arguments="--demo.optimize.batch-query=true --demo.sim-db-latency-ms=5"
 
 # 压测（脚本已参数化 port，可 -Jport 指向不同实例）
@@ -148,7 +150,7 @@ N+1 路径下每请求的 **MySQL 往返**变化：
 ```bash
 # 缓存实例（cache 开关打开 + 5ms 延迟，N+1 路径才会逐条走 ProductService）
 JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home \
-  mvn -DskipTests spring-boot:run \
+  mvn -DskipTests -pl concurrency-monolith spring-boot:run \
   -Dspring-boot.run.arguments="--demo.optimize.cache=true --demo.optimize.batch-query=false --demo.sim-db-latency-ms=5"
 
 # 预热填充缓存后再压测

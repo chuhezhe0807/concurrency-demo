@@ -7,8 +7,10 @@
 #   Redis    7    -> localhost:6379  无密码
 #   RabbitMQ 3.13 -> localhost:5672  (AMQP)  guest/guest
 #                    localhost:15672 (管理界面 http://localhost:15672)
+#   Nacos    2.3.2-> localhost:8848  (控制台/HTTP, http://localhost:8848/nacos  nacos/nacos)
+#                    localhost:9848  (gRPC，Nacos 2.x 客户端长连接必需)
 #
-# 注意：rabbitmq 仅在 MQ 阶段(US-015)及微服务阶段使用。若 docker.io 拉取受限，
+# 注意：rabbitmq 仅在 MQ 阶段(US-015)使用；nacos 在微服务阶段(US-017 起)使用。若 docker.io 拉取受限，
 #       可先只启动数据库与缓存：docker-compose up -d mysql redis
 
 services:
@@ -67,7 +69,26 @@ services:
       timeout: 5s
       retries: 10
 
+  nacos:
+    image: nacos/nacos-server:v2.3.2
+    container_name: concurrency-demo-nacos
+    environment:
+      MODE: standalone          # 单机模式，内置 Derby，无需外部数据库
+      JVM_XMS: 512m
+      JVM_XMX: 512m
+    ports:
+      - "8848:8848"             # 控制台 + 客户端 HTTP（注册/发现/配置）
+      - "9848:9848"             # Nacos 2.x 客户端 gRPC 长连接（必需，否则注册超时）
+    volumes:
+      - nacos-data:/home/nacos/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8848/nacos/v1/console/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   mysql-data:
   redis-data:
   rabbitmq-data:
+  nacos-data:

@@ -1,0 +1,28 @@
+server:
+  port: 8090   # 网关统一入口端口（单体仍在 8080，互不冲突）
+
+spring:
+  application:
+    name: gateway-service   # 注册到 Nacos 的服务名
+  cloud:
+    nacos:
+      discovery:
+        server-addr: localhost:8848   # Nacos 服务端地址（docker-compose 提供）
+    gateway:
+      discovery:
+        locator:
+          # 开启基于服务发现的自动路由：可用 /<service-id>/** 直接路由到对应微服务，
+          # 无需为每个下游服务手写 route。US-018/019 接入 product-service / order-service 后即可生效。
+          enabled: true
+          lower-case-service-id: true
+      # 后续也可在此显式定义 routes（id/uri=lb://service-name/predicates/filters）做更精细的控制。
+
+# 暴露 gateway 路由与健康端点，便于排查：GET /actuator/gateway/routes
+management:
+  endpoint:
+    gateway:
+      enabled: true   # Spring Cloud Gateway 4.x 起该端点默认关闭，需显式开启
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway

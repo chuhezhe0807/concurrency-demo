@@ -217,3 +217,20 @@
 改动文件：docs/STAGE1-SUMMARY.md(新增)、ralph/prd.json、ralph/progress.txt
 数字来源：jmeter/BENCHMARK.md(US-008/010/011/012 实测表) + US-014/015 progress 实测，全部为既有实测值的汇总，本 story 未新跑压测。
 如何验证：本 story 为文档汇总，不纳入自动化验证；文档内所有数字与 BENCHMARK.md 及各 US progress 记录一致，开关名/接口/命令与源码一致，交叉链接路径有效(docs/ 同级 + ../jmeter/BENCHMARK.md)。
+
+## US-017 阶段二：引入 Nacos 与 Spring Cloud Gateway [2026-06-08] PASS（microservices 分支）
+做了什么：
+- 阶段二起项目改为多模块 Maven reactor（用户选定标准 reactor 方案，工作在 microservices 分支）。
+- 根 pom 改为 packaging=pom 聚合器：仍继承 spring-boot-starter-parent 3.3.4；properties 新增 spring-cloud.version=2023.0.3、spring-cloud-alibaba.version=2023.0.1.3（与 Boot 3.3.x 匹配）；dependencyManagement 导入 spring-cloud-dependencies + spring-cloud-alibaba-dependencies 两个 BOM；<modules> 列 concurrency-monolith、gateway-service；移除原 dependencies/build（下放各模块）。
+- stage-1 单体迁入子模块：git mv src -> concurrency-monolith/src（保留 git 历史），包名 com.chuhezhe 不变；新建 concurrency-monolith/pom.xml（parent=根，含原 web/cache/redis/amqp/mybatis-plus/mysql/binlog-connector/test 依赖 + spring-boot-maven-plugin）。
+- 新增 gateway-service 模块：pom 引 spring-cloud-starter-gateway（响应式 WebFlux，刻意不引 starter-web 避免 Servlet 栈冲突）+ spring-cloud-starter-alibaba-nacos-discovery + actuator；GatewayApplication(@SpringBootApplication，注释说明 nacos-discovery 自动装配无需 @EnableDiscoveryClient)；application.yml：server.port=8090、spring.application.name=gateway-service、spring.cloud.nacos.discovery.server-addr=localhost:8848、spring.cloud.gateway.discovery.locator.enabled=true + lower-case-service-id=true（按 serviceId 自动路由，下游服务接入即生效）、management.endpoint.gateway.enabled=true（SCG 4.x 该端点默认关闭需显式开）+ 暴露 health/info/gateway。
+- docker-compose 增加 nacos：nacos/nacos-server:v2.3.2，MODE=standalone（内置 Derby 免外部库），暴露 8848(HTTP/控制台)+9848(2.x 客户端 gRPC 长连接，必需)，readiness 健康检查，命名卷 nacos-data；文件头补 Nacos 连接信息注释。
+- BENCHMARK.md 三处 spring-boot:run 改为 mvn -pl concurrency-monolith spring-boot:run（单体迁模块后的运行方式）。
+改动文件：pom.xml(改为聚合器)、concurrency-monolith/pom.xml(新增)、concurrency-monolith/src/**(由 src/ 迁入)、gateway-service/pom.xml(新增)、gateway-service/src/main/java/com/chuhezhe/gateway/GatewayApplication.java(新增)、gateway-service/src/main/resources/application.yml(新增)、docker-compose.yml(加 nacos)、jmeter/BENCHMARK.md、ralph/prd.json、ralph/progress.txt
+如何验证：
+- mvn -DskipTests compile 整 reactor BUILD SUCCESS，构建顺序 concurrency-demo[pom] -> concurrency-monolith[jar] -> gateway-service[jar]，Spring Cloud 2023.0.3 / Alibaba 2023.0.1.3 依赖解析成功。
+- docker compose up -d nacos：约 17s 后 healthy（注：amd64 镜像在 arm64 主机经模拟运行，启动稍慢但正常）。
+- mvn -pl gateway-service spring-boot:run：Netty started on port 8090；日志 "nacos registry, DEFAULT_GROUP gateway-service 192.168.50.9:8090 register finished" 与 "Started GatewayApplication"。
+- Nacos API 确认注册：GET /nacos/v1/ns/service/list -> {"count":1,"doms":["gateway-service"]}；GET /nacos/v1/ns/instance/list?serviceName=gateway-service -> 实例 ip:8090 healthy=true ephemeral=true。
+- 网关端点：GET /actuator/gateway/routes -> [](空数组，因下游服务尚未注册，US-018/019 接入 product/order-service 后由 discovery locator 自动填充路由)；GET /actuator/health -> UP。
+环境备注：nacos v2.3.2 镜像本机已缓存(1.27GB)。验证毕 kill 8090 网关进程；nacos 容器作为基础设施保留运行(与 mysql/redis/rabbitmq 一致)。Java 21 用 /opt/homebrew/opt/openjdk@21。
