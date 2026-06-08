@@ -25,6 +25,12 @@
             <groupId>com.alibaba.cloud</groupId>
             <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
         </dependency>
+        <!-- Seata 分布式事务(US-021)：作为 RM 参与 order-service 发起的全局事务。
+             收到 Feign 透传的 XID 后，扣库存 SQL 成为一个分支事务并生成 undo_log，由 TC 统一提交/回滚。 -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-seata</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>com.baomidou</groupId>

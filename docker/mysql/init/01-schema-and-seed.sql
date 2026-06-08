@@ -63,6 +63,22 @@ CREATE TABLE t_logistics (
   KEY idx_logistics_order (order_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- ---------- Seata AT 模式回滚日志表（US-021） ----------
+-- AT 模式一阶段执行业务 SQL 时，把数据「前镜像/后镜像」写入 undo_log 并随本地事务一起提交；
+-- 二阶段全局回滚时据此还原，全局提交时异步删除。order/product 两服务共用同一物理库 concurrency_demo，
+-- 故一张 undo_log 即可。DDL 取自 Seata 2.x 官方 MySQL 脚本。
+DROP TABLE IF EXISTS undo_log;
+CREATE TABLE undo_log (
+  branch_id     BIGINT       NOT NULL COMMENT 'branch transaction id',
+  xid           VARCHAR(128) NOT NULL COMMENT 'global transaction id',
+  context       VARCHAR(128) NOT NULL COMMENT 'undo_log context, such as serialization',
+  rollback_info LONGBLOB     NOT NULL COMMENT 'rollback info',
+  log_status    INT          NOT NULL COMMENT '0:normal status,1:defense status',
+  log_created   DATETIME(6)  NOT NULL COMMENT 'create datetime',
+  log_modified  DATETIME(6)  NOT NULL COMMENT 'modify datetime',
+  UNIQUE KEY ux_undo_log (xid, branch_id)
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COMMENT='AT transaction mode undo table';
+
 -- ---------- 数字生成器（0-9 数字表，交叉连接得到序列） ----------
 -- 用普通表而非 TEMPORARY 表：MySQL 不允许在同一查询中多次引用同一 TEMPORARY 表
 DROP TABLE IF EXISTS digits;

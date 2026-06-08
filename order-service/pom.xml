@@ -34,6 +34,13 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-loadbalancer</artifactId>
         </dependency>
+        <!-- Seata 分布式事务(US-021)：作为 TM 发起全局事务、作为 RM 参与 t_order 分支。
+             由 SCA BOM 管理版本(seata 2.1.0)，传递引入 seata-spring-boot-starter，
+             自动代理 DataSource(AT 模式) 并给 Feign 加 XID 透传拦截器。 -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-seata</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>com.baomidou</groupId>

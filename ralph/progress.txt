@@ -309,3 +309,53 @@
 环境备注：依赖 docker mysql(3306)+nacos(8848)healthy（本次会话 docker 曾因上次闪退关闭，重新 open -a Docker 起来，
   mysql/nacos/redis/rabbitmq 均 healthy）。验证用 8071/8072 实例 + 8090 网关，验证毕 kill 三个 dev 进程；
   nacos/docker 基础设施保留运行。jmeter 新产物已 gitignore。Java 21 用 /opt/homebrew/opt/openjdk@21。
+
+## US-021 阶段二：Seata 分布式事务（强一致）[2026-06-08] PASS（microservices 分支）
+做了什么：
+- 用 Seata AT 模式补上 US-019 的跨服务一致性缺口：order-service 本地 @Transactional 只回滚 t_order，
+  管不到 Feign 已提交的远程扣库存——"扣库存成功但建单失败"会扣空库存却没订单。Seata 把两服务的本地事务
+  绑成一个全局事务(2PC)，由 TC 统一提交/回滚。
+- 版本：Seata 2.1.0(Apache 版 groupId org.apache.seata，由 SCA 2023.0.1.3 BOM 管理)。
+- 基础设施：docker-compose 加 seata 服务(apache/seata-server:2.1.0，8091 TC Netty + 7091 控制台 seata/seata，
+  STORE_MODE=file，healthcheck 探 7091)。镜像在本机 VPN 下 docker pull 成功(docker.io 此前 context deadline 不可达)。
+- undo_log 表(AT 回滚日志，记录数据前/后镜像)：写入 docker/mysql/init/01-schema-and-seed.sql(重建卷可复现)；
+  因现有 MySQL 卷已初始化，另用 docker exec 在运行中的库实时补建。order/product 同物理库 concurrency_demo，共用一张。
+- order-service(TM 发起方 + 一个 RM 分支)：
+  · pom 加 com.alibaba.cloud:spring-cloud-starter-alibaba-seata(自动代理数据源 AT + Feign XID 透传 + 扫 @GlobalTransactional)。
+  · application.yml 加 seata 配置块：enabled、application-id=order-service、tx-service-group=default_tx_group、
+    service.vgroup-mapping.default_tx_group=default、service.grouplist.default=127.0.0.1:8091、
+    registry/config type=file(直连 TC 不经 Nacos)、data-source-proxy-mode=AT。
+  · OrderService.placeOrder 加 @GlobalTransactional(rollbackFor=Exception.class，保留 @Transactional)。
+  · CreateOrderRequest 加 mockFail 字段；placeOrder 在扣库存+建单都成功后，mockFail=true 则抛 IllegalStateException
+    触发全局回滚(失败注入演示)。
+- product-service(RM 分支参与方)：
+  · pom 同样加 spring-cloud-starter-alibaba-seata。
+  · application.yml 同款 seata 配置块(application-id=product-service，tx-service-group 与 order 一致)。
+  · ProductService.deductStock 加 @Transactional，使其成为规范本地分支(AT 为其旁路 undo_log；XID 经 Feign 头透传自动挂入全局事务)。
+- XID 透传由 SCA seata 集成自动完成(给 Feign 加拦截器)，无需手写。registry 用 file 直连 TC 而非 Nacos：
+  服务都跑宿主机、seata 容器映射 8091，直连最稳；Nacos 仅供 Feign 发现 product-service，与 TC 寻址解耦。
+改动文件：docker-compose.yml(加 seata 服务)、docker/mysql/init/01-schema-and-seed.sql(加 undo_log)、
+  order-service/pom.xml、order-service/src/main/resources/application.yml、
+  order-service/src/main/java/com/chuhezhe/order/service/OrderService.java(@GlobalTransactional+失败注入+更新缺口注释)、
+  order-service/src/main/java/com/chuhezhe/order/dto/CreateOrderRequest.java(加 mockFail)、
+  product-service/pom.xml、product-service/src/main/resources/application.yml、
+  product-service/src/main/java/com/chuhezhe/product/service/ProductService.java(deductStock 加 @Transactional)、
+  docs/SEATA.md(新增)、ralph/prd.json、ralph/progress.txt
+如何验证：
+- mvn -DskipTests compile：reactor 5 模块 BUILD SUCCESS(seata 注解 org.apache.seata.spring.annotation.GlobalTransactional 解析正常)。
+- 起 seata(8091)+product(8071)+order(8072)+gateway(8090)：两服务启动日志均出现
+  "register RM success. client version:2.1.0, server version:2.1.0 ... R:/127.0.0.1:8091" 与
+  "Auto proxy data source 'dataSource' by 'AT' mode."；order 侧 OrderService 被 GlobalTransactionalInterceptor 织入。
+- 基线：product_7 stock=999985、t_order=30011、undo_log=0。
+- 成功路径：POST 网关 /order-service/orders {userId:1,productId:7,quantity:3} -> 200(orderId/orderNo)；
+  stock 999985->999982(-3)、t_order +1、undo_log 提交后回 0；seata server 日志
+  "Commit branch transaction successfully" x2(product 扣减 + order 建单两个分支) + "Committing global transaction is successfully done"。
+- 回滚路径：同请求加 "mockFail":true -> HTTP 500；stock 999982 不变、t_order 不变、undo_log 回 0；
+  seata server 日志 "GlobalRollbackRequest -> BranchRollbackResponse ... PhaseTwo_Rollbacked -> Rollback global transaction successfully"；
+  order 日志抛 IllegalStateException("mock 建单后失败...")。关键：扣库存是经 Feign 跨进程在 product 库提交的，US-019 本地事务回不来；
+  Seata 经 undo_log 自动还原，stock 保持不变、订单未落库——跨服务强一致达成。
+- 文档 docs/SEATA.md：问题承接(US-019 缺口/同库两数据源仍需分布式事务)、TC-TM-RM 三角色表、AT 两阶段(一阶段业务SQL+前后镜像写
+  undo_log 一起本地提交；二阶段全局提交异步删 undo_log/全局回滚按后镜像校验+前镜像还原)、XID 经 Feign 透传、接入改动、
+  commit/rollback 实测表、AT vs TCC 对比、AT 局限(全局锁防脏写/读未提交/仅关系型库 SQL 可解析/file 模式 TC 单点)、与 US-022 最终一致的对比铺垫。
+环境备注：docker mysql(3306)+nacos(8848)+seata(8091) 均 healthy。验证毕 pkill spring-boot:run 清理 8071/8072/8090 dev 进程；
+  seata/nacos/mysql 等基础设施容器保留。product_7 stock 因成功路径测试 999985->999982(100w 余量充足，未还原)。Java 21 用 /opt/homebrew/opt/openjdk@21。

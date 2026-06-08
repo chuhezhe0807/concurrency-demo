@@ -7,6 +7,7 @@ import com.chuhezhe.order.dto.OrderResult;
 import com.chuhezhe.order.dto.ProductDTO;
 import com.chuhezhe.order.entity.Order;
 import com.chuhezhe.order.mapper.OrderMapper;
+import org.apache.seata.spring.annotation.GlobalTransactional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -23,10 +24,12 @@ import java.util.concurrent.ThreadLocalRandom;
  * 单体没有的问题——见下方注释与 docs/MICROSERVICES.md：
  * <ul>
  *   <li>网络调用：可能超时/失败，比本地方法慢且不可靠；</li>
- *   <li>数据一致性：扣库存(product-service 的库)与建订单(order-service 的库)是两个独立事务，
- *       本地 @Transactional 管不到远程——若扣库存成功但建单失败，库存就被「扣空了却没订单」。
- *       本 story 仅暴露问题、不解决；强一致(Seata)与最终一致(可靠消息)分别留给 US-021 / US-022。</li>
+ *   <li>数据一致性：扣库存(product-service 的库)与建订单(order-service 的库)是两个独立事务。</li>
  * </ul>
+ * <p>
+ * US-021（本次）用 Seata AT 模式补上一致性缺口：placeOrder 上加 {@link GlobalTransactional} 开启全局事务，
+ * XID 经 Feign 透传给 product-service，扣库存与建订单成为同一全局事务下的两个分支，由 TC 统一提交或回滚。
+ * 这样「扣库存成功但建单失败」时，product 已扣的库存会经 undo_log 自动还原，不再出现「扣空却没订单」。
  */
 @Service
 public class OrderService {
@@ -41,6 +44,7 @@ public class OrderService {
         this.productClient = productClient;
     }
 
+    @GlobalTransactional(rollbackFor = Exception.class, name = "place-order-tx")
     @Transactional
     public OrderResult placeOrder(CreateOrderRequest req) {
         long start = System.currentTimeMillis();
@@ -61,7 +65,8 @@ public class OrderService {
             throw new IllegalStateException("库存不足或商品不存在: productId=" + req.getProductId());
         }
 
-        // 3) 建订单（本地库）。注意：若这一步失败，第 2 步已扣的库存不会自动回滚——跨服务一致性问题，见 US-021/022。
+        // 3) 建订单（本地库）。已在 @GlobalTransactional 内：若后续抛异常，TC 会回滚本地 insert
+        //    并通知 product-service 分支经 undo_log 还原已扣的库存。
         BigDecimal amount = product.getPrice().multiply(BigDecimal.valueOf(quantity));
         Order order = new Order();
         order.setOrderNo(generateOrderNo());
@@ -72,6 +77,11 @@ public class OrderService {
         order.setStatus(0);
         order.setCreateTime(LocalDateTime.now());
         orderMapper.insert(order);
+
+        // 4) US-021 失败注入：扣库存与建单都成功后故意失败，触发 Seata 全局回滚以演示强一致。
+        if (Boolean.TRUE.equals(req.getMockFail())) {
+            throw new IllegalStateException("mock 建单后失败，触发 Seata 全局回滚（库存应被还原、订单不落库）");
+        }
 
         log.info("[ORDER] 跨服务下单成功 orderNo={} productId={} qty={} amount={}",
                 order.getOrderNo(), req.getProductId(), quantity, amount);

@@ -24,6 +24,24 @@ mybatis-plus:
       logic-delete-value: 1
       logic-not-delete-value: 0
 
+# Seata 分布式事务（US-021，AT 模式）。
+# product-service 是分支参与方(RM)：收到 order-service 经 Feign 透传的 XID 后，扣库存 SQL 注册为分支事务，
+# 旁路生成 undo_log，全局回滚时据此还原库存。tx-service-group/grouplist 须与 order-service 完全一致。
+seata:
+  enabled: true
+  application-id: product-service
+  tx-service-group: default_tx_group
+  service:
+    vgroup-mapping:
+      default_tx_group: default
+    grouplist:
+      default: 127.0.0.1:8091
+  registry:
+    type: file
+  config:
+    type: file
+  data-source-proxy-mode: AT
+
 management:
   endpoints:
     web:

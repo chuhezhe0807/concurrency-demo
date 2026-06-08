@@ -5,6 +5,7 @@ import com.chuhezhe.product.entity.Product;
 import com.chuhezhe.product.mapper.ProductMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -52,7 +53,12 @@ public class ProductService {
     /**
      * 扣库存：带「库存 >= quantity」条件的乐观更新，返回是否扣减成功。
      * 库存不足或商品不存在时返回 false（影响行数为 0），不抛异常，由调用方决定如何处理。
+     * <p>
+     * US-021：加 @Transactional 使本方法成为一个规范的本地事务。当请求携带 Seata 全局事务的 XID 时
+     * （由 order-service 经 Feign 透传），该本地事务被纳入全局事务作为一个 RM 分支，AT 代理数据源会为这条
+     * UPDATE 旁路生成 undo_log，供全局回滚时还原库存。
      */
+    @Transactional
     public boolean deductStock(Long id, int quantity) {
         if (quantity <= 0) {
             throw new IllegalArgumentException("quantity 必须大于 0");

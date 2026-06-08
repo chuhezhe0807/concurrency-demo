@@ -24,6 +24,24 @@ mybatis-plus:
       logic-delete-value: 1
       logic-not-delete-value: 0
 
+# Seata 分布式事务（US-021，AT 模式）。
+# order-service 是全局事务发起方(TM)：placeOrder 上 @GlobalTransactional 开启全局事务，
+# 拿到 XID 后经 Feign 透传给 product-service，两边的本地事务作为分支由 TC 统一提交/回滚。
+seata:
+  enabled: true
+  application-id: order-service
+  tx-service-group: default_tx_group          # 事务分组名（逻辑名）
+  service:
+    vgroup-mapping:
+      default_tx_group: default                # 分组 -> 集群名，须与 TC 集群名一致(默认 default)
+    grouplist:
+      default: 127.0.0.1:8091                  # file 模式直连 TC（服务跑在宿主机，seata 容器映射到 8091）
+  registry:
+    type: file                                 # 不经 Nacos，直连 grouplist
+  config:
+    type: file
+  data-source-proxy-mode: AT                   # 自动代理数据源，业务 SQL 旁路生成 undo_log
+
 management:
   endpoints:
     web:
