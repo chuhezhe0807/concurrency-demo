@@ -33,9 +33,10 @@ POST /orders/reliable
  └─立即返回 orderNo（待确认）
 
 OutboxRelay @Scheduled 每2s
- └─扫描 NEW → convertAndSend ──────▶ stock.deduct.queue ──▶ StockDeductListener
+ └─扫描 NEW/超时SENDING → 占位置SENDING → convertAndSend ──▶ stock.deduct.queue ──▶ StockDeductListener
                               ◀── publisher confirm           └─[本地事务] insert 幂等表(order_no PK)
  └─收到 confirm → outbox 置 SENT                                   主键冲突→已处理→跳过
+   (confirm 未回的 SENDING 行在途窗口内不重投；超时才当作丢失重发)
                                                               └─扣库存(库存充足? 成功:失败)
  OrderResultListener ◀── order.result.queue ◀──────────────── └─回传 OrderResultMsg + basicAck
  └─[幂等]仅当订单仍=待确认才推进
@@ -43,13 +44,14 @@ OutboxRelay @Scheduled 每2s
 ```
 
 订单状态：`0=待确认` `1=已确认` `2=已取消（库存不足补偿）`。
+发件箱状态：`0=NEW 待发送` `1=SENT 已确认投递` `2=SENDING 已投出待 confirm`（在途护栏，见第 6 节）。
 
 ## 4. 关键代码
 
 | 关注点 | 位置 |
 | --- | --- |
 | 订单+消息同事务写入 | `order-service` `OrderService.placeOrderReliable` |
-| 轮询投递 + confirm 置 SENT + 失败重发 | `order-service` `OutboxRelay`（`@EnableScheduling`，`fixedDelay=2000`） |
+| 轮询投递 + 在途护栏 + confirm 置 SENT + 失败重发 | `order-service` `OutboxRelay`（`@EnableScheduling`，`fixedDelay=2000`，`STALE=10s`） |
 | 结果消费、状态推进（幂等） | `order-service` `OrderResultListener` + `OrderService.applyDeductResult` |
 | 扣库存消费、幂等去重 | `product-service` `StockDeductListener` + `ProductService.deductForOrder` |
 | 队列/交换机/DLQ 拓扑（两侧同名声明） | 两服务各自的 `config.RabbitConfig` |
@@ -82,6 +84,7 @@ OutboxRelay @Scheduled 每2s
   `stock >= quantity` 乐观判断，不靠下单时锁定。对「下单即扣减锁定」的强诉求要用 Seata（US-021）。
 - **补偿的简化**：本演示库存「不足就不扣」，失败时无需反向冲正；若改成「先预扣再确认」，取消时需发反向消息把库存加回（TCC/Saga 补偿），复杂度更高。
 - **毒消息**：扣库存消费异常时 `basicNack(requeue=false)` 进 `stock.deduct.dlq`，避免无限重投；真正的「不丢」由本地消息表轮询重发保证，DLQ 仅供排查/人工补偿。
+- **在途护栏（避免冗余投递）**：confirm 回调是异步的，轮询却每 2s 跑一轮——若只认 `NEW`，一条「已发出、confirm 未回」的消息在该窗口内仍是 `NEW` 会被重复投递（即便 broker 正常、只是 confirm 慢）。对策是发送前先占位置 `SENDING` 并记 `last_send_time`：未超时的 `SENDING` 行不再被捞起，只有超过 `STALE`（10s）的才当作丢失重发；明确 nack/异常则立刻回置 `NEW` 下一轮即重发。这把「重发」从「下一轮 status 仍为 NEW」收窄为「确实失败或确实超时」，重复投递最终仍由消费端幂等去重兜底。注意这只削减冗余、不追求零重复，本质仍是 at-least-once。
 - **幂等表无界增长**：`t_stock_deduct_log` 需定期归档；生产可用带 TTL 的存储或与业务表合并判断。
 
 详尽的「强一致 vs 最终一致」选型对比见 US-023（`docs/` 待补）。

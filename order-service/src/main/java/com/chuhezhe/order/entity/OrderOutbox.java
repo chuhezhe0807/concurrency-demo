@@ -7,19 +7,24 @@ import java.time.LocalDateTime;
 
 /**
  * 本地消息表（US-022）。建订单时与 t_order 在同一本地事务里插入，消除「DB 写成功但消息没发」的双写缺口。
- * status: 0=NEW 待发送, 1=SENT 已确认投递。
+ * status: 0=NEW 待发送, 1=SENT 已确认投递, 2=SENDING 已投出待 confirm。
+ * <p>
+ * SENDING 是「在途护栏」：投递前先把行置 SENDING 并记 {@link #lastSendTime}，使本轮发出的消息在 confirm
+ * 未回的窗口内不被下一轮轮询重复捞起；只有 confirm 迟迟不回（超过阈值）的 SENDING 行才会被当作丢失重发。
  */
 @TableName("t_order_outbox")
 public class OrderOutbox {
 
     public static final int STATUS_NEW = 0;
     public static final int STATUS_SENT = 1;
+    public static final int STATUS_SENDING = 2;
 
     private Long id;
     private String orderNo;
     private String payload;
     private Integer status;
     private Integer retryCount;
+    private LocalDateTime lastSendTime;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 
@@ -64,6 +69,14 @@ public class OrderOutbox {
 
     public void setRetryCount(Integer retryCount) {
         this.retryCount = retryCount;
+    }
+
+    public LocalDateTime getLastSendTime() {
+        return lastSendTime;
+    }
+
+    public void setLastSendTime(LocalDateTime lastSendTime) {
+        this.lastSendTime = lastSendTime;
     }
 
     public LocalDateTime getCreateTime() {

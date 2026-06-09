@@ -13,6 +13,8 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -24,11 +26,20 @@ import java.util.List;
  * <p>
  * 这是「本地消息表」方案对比纯 publisher-confirm 的关键：即便进程在「写库成功、发消息前」崩溃，
  * 重启后轮询仍能把遗留的 NEW 消息补发出去，不依赖内存中的待发队列。
+ * <p>
+ * <b>在途护栏</b>：confirm 回调是异步的，轮询却每 2s 无脑跑一轮。若只认 status=NEW，则一条消息在
+ * 「已发出、confirm 还没回来」的窗口里仍是 NEW，会被下一轮重复投递（即便 broker 一切正常、只是 confirm 慢）。
+ * 为此投递前先把行置 SENDING 并记 last_send_time「占位」：本轮发出的消息在 {@link #STALE} 窗口内不再被捞起；
+ * 只有 confirm 迟迟不回、SENDING 超过 {@link #STALE} 的行才被当作丢失重新投递。confirm 成功→SENT；
+ * 明确失败（nack/异常）→立刻回置 NEW 下一轮即重发。重复投递最终仍由消费端幂等去重兜底。
  */
 @Component
 public class OutboxRelay {
 
     private static final Logger log = LoggerFactory.getLogger(OutboxRelay.class);
+
+    /** SENDING 行被视为「在途」的最长时长；超过即认定 confirm 丢失，允许下一轮重发。需 &gt; 正常 confirm 延迟。 */
+    private static final Duration STALE = Duration.ofSeconds(10);
 
     private final OrderOutboxMapper outboxMapper;
     private final RabbitTemplate rabbitTemplate;
@@ -43,8 +54,15 @@ public class OutboxRelay {
     /** 每 2 秒扫描一次待发送消息。生产可用更密集调度或事务提交后立即触发一次 + 轮询兜底。 */
     @Scheduled(fixedDelay = 2000)
     public void relay() {
+        // 捞取条件：① 全新待发(NEW)；② 已投出但 confirm 迟迟不回、超过 STALE 的在途行(SENDING)，视为丢失重发。
+        // 在途未超时的 SENDING 行被排除，避免「confirm 只是慢」就被下一轮重复投递。
+        LocalDateTime staleBefore = LocalDateTime.now().minus(STALE);
         List<OrderOutbox> pending = outboxMapper.selectList(new LambdaQueryWrapper<OrderOutbox>()
-                .eq(OrderOutbox::getStatus, OrderOutbox.STATUS_NEW)
+                .and(w -> w
+                        .eq(OrderOutbox::getStatus, OrderOutbox.STATUS_NEW)
+                        .or(o -> o
+                                .eq(OrderOutbox::getStatus, OrderOutbox.STATUS_SENDING)
+                                .lt(OrderOutbox::getLastSendTime, staleBefore)))
                 .orderByAsc(OrderOutbox::getId)
                 .last("limit 50"));
         if (pending.isEmpty()) {
@@ -56,6 +74,9 @@ public class OutboxRelay {
     }
 
     private void publish(OrderOutbox outbox) {
+        // 占位：发送前先同步置 SENDING + last_send_time=now，本轮发出的消息在 STALE 窗口内不再被捞起。
+        // 必须先于 convertAndSend，否则下一轮轮询可能在 confirm 回来前就重复投递。
+        claim(outbox);
         // correlationData 关联 confirm 回调：以 outbox 主键标识，broker 确认后置 SENT。
         CorrelationData correlation = new CorrelationData(String.valueOf(outbox.getId()));
         correlation.getFuture().whenComplete((confirm, ex) -> {
@@ -63,8 +84,9 @@ public class OutboxRelay {
                 markSent(outbox.getId());
                 log.info("[OUTBOX] 投递确认成功，置 SENT orderNo={} outboxId={}", outbox.getOrderNo(), outbox.getId());
             } else {
-                bumpRetry(outbox.getId());
-                log.warn("[OUTBOX] 未收到 broker 确认，下一轮重发 orderNo={} outboxId={} cause={}",
+                // 明确失败：回置 NEW，下一轮立即重发（不必等 STALE 超时）。
+                resetToNew(outbox.getId());
+                log.warn("[OUTBOX] 未收到 broker 确认，回置 NEW 下一轮重发 orderNo={} outboxId={} cause={}",
                         outbox.getOrderNo(), outbox.getId(), ex == null ? confirm : ex.getMessage());
             }
         });
@@ -92,14 +114,20 @@ public class OutboxRelay {
         outboxMapper.updateById(update);
     }
 
-    private void bumpRetry(Long id) {
-        OrderOutbox current = outboxMapper.selectById(id);
-        if (current == null) {
-            return;
-        }
+    /** 占位为「在途」：置 SENDING、刷新 last_send_time、retry_count 计一次投递尝试。 */
+    private void claim(OrderOutbox outbox) {
+        OrderOutbox update = new OrderOutbox();
+        update.setId(outbox.getId());
+        update.setStatus(OrderOutbox.STATUS_SENDING);
+        update.setLastSendTime(LocalDateTime.now());
+        update.setRetryCount(outbox.getRetryCount() == null ? 1 : outbox.getRetryCount() + 1);
+        outboxMapper.updateById(update);
+    }
+
+    private void resetToNew(Long id) {
         OrderOutbox update = new OrderOutbox();
         update.setId(id);
-        update.setRetryCount(current.getRetryCount() == null ? 1 : current.getRetryCount() + 1);
+        update.setStatus(OrderOutbox.STATUS_NEW);
         outboxMapper.updateById(update);
     }
 }
