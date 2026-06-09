@@ -74,8 +74,10 @@ order-service 的 `placeOrder` 标了 `@Transactional`，但这个事务**只能
 
 | 方案 | 一致性 | 思路 | 对应 story |
 | --- | --- | --- | --- |
-| Seata（AT/TCC） | 强一致 | 全局事务协调器，跨服务统一提交/回滚 | US-021 |
-| 可靠消息（本地消息表 / publisher confirm + 手动 ack） | 最终一致 | 先保证消息不丢，靠重试/补偿最终对齐 | US-022 |
+| Seata（AT/TCC） | 强一致 | 全局事务协调器，跨服务统一提交/回滚 | US-021（[SEATA.md](SEATA.md)） |
+| 可靠消息（本地消息表 / publisher confirm + 手动 ack） | 最终一致 | 先保证消息不丢，靠重试/补偿最终对齐 | US-022（[RELIABLE-MESSAGE.md](RELIABLE-MESSAGE.md)） |
+
+两种方案的适用场景、性能代价、复杂度与选型建议对比见 [CONSISTENCY-TRADEOFF.md](CONSISTENCY-TRADEOFF.md)（US-023）。
 
 代码里 `OrderService.placeOrder` 第 3 步上方有注释明确标注了这个回滚缺口。
 

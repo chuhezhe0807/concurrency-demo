@@ -87,4 +87,4 @@ OutboxRelay @Scheduled 每2s
 - **在途护栏（避免冗余投递）**：confirm 回调是异步的，轮询却每 2s 跑一轮——若只认 `NEW`，一条「已发出、confirm 未回」的消息在该窗口内仍是 `NEW` 会被重复投递（即便 broker 正常、只是 confirm 慢）。对策是发送前先占位置 `SENDING` 并记 `last_send_time`：未超时的 `SENDING` 行不再被捞起，只有超过 `STALE`（10s）的才当作丢失重发；明确 nack/异常则立刻回置 `NEW` 下一轮即重发。这把「重发」从「下一轮 status 仍为 NEW」收窄为「确实失败或确实超时」，重复投递最终仍由消费端幂等去重兜底。注意这只削减冗余、不追求零重复，本质仍是 at-least-once。
 - **幂等表无界增长**：`t_stock_deduct_log` 需定期归档；生产可用带 TTL 的存储或与业务表合并判断。
 
-详尽的「强一致 vs 最终一致」选型对比见 US-023（`docs/` 待补）。
+详尽的「强一致 vs 最终一致」选型对比见 [CONSISTENCY-TRADEOFF.md](CONSISTENCY-TRADEOFF.md)（US-023）。

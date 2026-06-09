@@ -137,5 +137,5 @@ AT 局限：
 ## 6. 与 US-022 的对比
 
 Seata（强一致）追求“要么都成功要么都回滚、过程对外尽量不可见”，代价是**全局锁、同步等待、TC 依赖**，吞吐和可用性有损耗。
-很多业务并不需要这么强——下单扣库存可以接受“最终一致”：先把订单做了，库存异步可靠地扣。US-022 会用 **RabbitMQ 可靠消息**
-实现最终一致，再与本篇做选型对比（见后续 docs 与 [MICROSERVICES.md](MICROSERVICES.md) 的一致性缺口表）。
+很多业务并不需要这么强——下单扣库存可以接受“最终一致”：先把订单做了，库存异步可靠地扣。US-022 用 **RabbitMQ 可靠消息**
+实现最终一致（见 [RELIABLE-MESSAGE.md](RELIABLE-MESSAGE.md)），两者的适用场景/性能代价/复杂度/选型建议详见 [CONSISTENCY-TRADEOFF.md](CONSISTENCY-TRADEOFF.md)（US-023）。
