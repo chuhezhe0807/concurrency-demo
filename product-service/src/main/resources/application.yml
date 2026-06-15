@@ -24,6 +24,20 @@ spring:
       simple:
         acknowledge-mode: manual   # 手动 ack：扣库存+回传成功才确认，处理中崩溃则消息重投不丢
 
+  mail:
+    host: smtp.163.com         # SMTP 服务器地址，如 smtp.qq.com / smtp.163.com
+    port: 465                      # 163 用 465(SSL)；不支持 587(STARTTLS)，否则握手即断 bad greeting
+    username: xxx@163.com    # 发件人账号
+    password: JVQkdHnRkHj2vEgk   # 授权码（不是登录密码）
+    default-encoding: UTF-8
+    properties:
+      mail:
+        smtp:
+          auth: true
+          ssl:
+            enable: true           # 465 端口走 SSL；连上即 SSL 握手，无需 STARTTLS
+            required: true
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
@@ -50,6 +64,23 @@ seata:
   config:
     type: file
   data-source-proxy-mode: AT
+
+
+# 扣库存消费演示开关：true 时消费扣库存消息直接抛异常 → 进死信队列 → 触发邮件告警。
+# 演示 DLQ 告警链路用，验证完改回 false 即恢复正常扣库存。
+stock:
+  mock-fail: false
+
+# DLQ 告警配置（US-023）。消息进入死信队列时发送邮件告警。
+dlq:
+  alert:
+    enabled: false                  # 告警开关，测试环境可设 false 关闭
+    from: xxx@163.com       # 发件人（与 spring.mail.username 保持一致）
+    to:                            # 收件人列表（支持多个）
+      - zzz@163.com
+    subject-prefix: "[告警][product-service] 死信队列有消息"  # 邮件标题前缀
+    # 冷却时间（秒）：同一 orderNo 在此窗口内只发一封告警，防止频繁重复告警
+    cooldown-seconds: 300
 
 management:
   endpoints:

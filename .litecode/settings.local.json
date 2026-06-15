@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "edit_file(product-service/*)",
+      "write_file(product-service/src/main/java/com/chuhezhe/product/config/*)",
+      "write_file(product-service/src/main/java/com/chuhezhe/product/service/*)"
+    ],
+    "deny": []
+  }
+}

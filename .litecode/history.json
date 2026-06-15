@@ -1,0 +1,6 @@
+[
+  "看下这个项目，是干什么的，用了什么技术栈",
+  "src/main/java/com/chuhezhe/order/config/RabbitConfig.java@stockDeductQueue 这里消费失败的消息到死信队列，只有人工排查才能发现，那能不能设计一个告警系统呢？如果有消息进入死信队列发送邮件进行告警",
+  "继续",
+  "src/main/java/com/chuhezhe/order/config/RabbitConfig.java@stockDeductQueue 这里消费失败的消息到死信队列，只有人工排查才能发现，那能不能设计一个告警系统呢？如果有消息进入死信队列发送邮件进行告警"
+]

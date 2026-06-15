@@ -48,6 +48,12 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- DLQ 告警邮件（US-023）：死信队列有消息时发送告警邮件给运维 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>

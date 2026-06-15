@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -32,6 +33,14 @@ public class StockDeductListener {
     private final ProductService productService;
     private final RabbitTemplate rabbitTemplate;
 
+    /**
+     * 模拟异常开关（演示 DLQ + 邮件告警）。配置 {@code stock.mock-fail=true} 时，
+     * 消费扣库存消息会直接抛异常 → nack 进死信队列，触发告警链路。
+     * 默认 false（正常业务），演示完无需改代码、改配置即可恢复。
+     */
+    @Value("${stock.mock-fail:false}")
+    private boolean mockFail;
+
     public StockDeductListener(ProductService productService, RabbitTemplate rabbitTemplate) {
         this.productService = productService;
         this.rabbitTemplate = rabbitTemplate;
@@ -43,6 +52,9 @@ public class StockDeductListener {
         try {
             log.info("[STOCK-CONSUME] 收到扣库存消息 orderNo={} productId={} qty={}",
                     msg.getOrderNo(), msg.getProductId(), msg.getQuantity());
+            if (mockFail) {
+                throw new RuntimeException("模拟扣库存异常（演示 DLQ + 邮件告警）");
+            }
             ProductService.DeductOutcome outcome = productService.deductForOrder(msg);
             OrderResultMsg result = new OrderResultMsg(msg.getOrderNo(), outcome.success(), outcome.reason());
             rabbitTemplate.convertAndSend(RabbitConfig.SAGA_EXCHANGE, RabbitConfig.ORDER_RESULT_KEY, result);
