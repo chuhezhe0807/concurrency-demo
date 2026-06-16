@@ -1,6 +1,10 @@
-# 高并发演示项目第三方依赖
-# 启动：docker-compose up -d
-# 停止：docker-compose down        （加 -v 连数据卷一起删除）
+# 高并发演示项目：第三方依赖 + 阶段二微服务整体部署
+# 仅起基础设施：     docker-compose up -d mysql redis rabbitmq nacos seata
+# 构建并整体部署：   docker-compose up -d --build   （含 product/order/gateway/nginx）
+# 停止：             docker-compose down            （加 -v 连数据卷一起删除）
+#
+# 统一入口：http://localhost/      （nginx:80 -> gateway-service:8090 -> 下游微服务）
+# 网关直连：http://localhost:8090/ （调试用）
 #
 # 服务与连接信息：
 #   MySQL    8.0  -> localhost:3306  库 concurrency_demo  用户 demo/demo123  (root 密码 root123)
@@ -107,6 +111,82 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
+  # ===== 应用微服务（阶段二）=====
+  # 镜像由各服务下的 Dockerfile 多阶段构建（context 设为仓库根，自带 maven 打包）。
+  # 注意：服务内 application.yml 把依赖地址写成 localhost（便于本机直跑），
+  #       容器内需指向 compose 服务名，这里用环境变量按 Spring 宽松绑定规则覆盖，不改 yml。
+  product-service:
+    build:
+      context: .
+      dockerfile: product-service/Dockerfile
+    image: concurrency-demo/product-service:1.0
+    container_name: concurrency-demo-product
+    environment:
+      SPRING_CLOUD_NACOS_DISCOVERY_SERVER_ADDR: nacos:8848        # 覆盖 spring.cloud.nacos.discovery.server-addr
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/concurrency_demo?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_RABBITMQ_HOST: rabbitmq                               # 覆盖 spring.rabbitmq.host
+      SEATA_SERVICE_GROUPLIST_DEFAULT: seata:8091                  # 覆盖 seata.service.grouplist.default（file 模式直连 TC）
+    depends_on:
+      mysql:
+        condition: service_healthy
+      nacos:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      seata:
+        condition: service_healthy
+
+  order-service:
+    build:
+      context: .
+      dockerfile: order-service/Dockerfile
+    image: concurrency-demo/order-service:1.0
+    container_name: concurrency-demo-order
+    environment:
+      SPRING_CLOUD_NACOS_DISCOVERY_SERVER_ADDR: nacos:8848
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/concurrency_demo?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SEATA_SERVICE_GROUPLIST_DEFAULT: seata:8091
+    depends_on:
+      mysql:
+        condition: service_healthy
+      nacos:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      seata:
+        condition: service_healthy
+
+  gateway-service:
+    build:
+      context: .
+      dockerfile: gateway-service/Dockerfile
+    image: concurrency-demo/gateway-service:1.0
+    container_name: concurrency-demo-gateway
+    environment:
+      SPRING_CLOUD_NACOS_DISCOVERY_SERVER_ADDR: nacos:8848
+    ports:
+      - "8090:8090"             # 直连网关便于调试（生产入口走 nginx 80）
+    depends_on:
+      nacos:
+        condition: service_healthy
+      product-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+
+  # ===== Nginx 统一入口 =====
+  # 监听宿主机 80，反向代理到 gateway-service:8090；gateway 再按 serviceId 路由到下游微服务。
+  nginx:
+    image: nginx:alpine
+    container_name: concurrency-demo-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - gateway-service
 
 volumes:
   mysql-data:

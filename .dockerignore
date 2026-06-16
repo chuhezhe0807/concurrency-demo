@@ -1,0 +1,16 @@
+# 缩小 docker build 上下文，加速镜像构建
+**/target/
+.git/
+.idea/
+.mvn/
+arthas-boot.jar
+arthas-output/
+jmeter/
+dist/
+docs/
+tasks/
+ralph/
+*.iml
+.DS_Store
+.claude/
+.litecode/
