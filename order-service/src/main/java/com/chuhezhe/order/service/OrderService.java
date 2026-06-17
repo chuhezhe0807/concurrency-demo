@@ -5,7 +5,7 @@ import com.chuhezhe.order.dto.CreateOrderRequest;
 import com.chuhezhe.order.dto.DeductResult;
 import com.chuhezhe.order.dto.OrderResult;
 import com.chuhezhe.order.dto.ProductDTO;
-import com.chuhezhe.order.dto.StockDeductMsg;
+import com.chuhezhe.common.dto.StockDeductMsg;
 import com.chuhezhe.order.entity.Order;
 import com.chuhezhe.order.entity.OrderOutbox;
 import com.chuhezhe.order.mapper.OrderMapper;

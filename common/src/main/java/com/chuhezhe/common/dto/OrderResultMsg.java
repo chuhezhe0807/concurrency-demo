@@ -1,7 +1,9 @@
-package com.chuhezhe.order.dto;
+package com.chuhezhe.common.dto;
 
 /**
  * 扣库存结果消息（US-022）。product-service 处理完扣库存后回传，order-service 据此确认/取消订单。
+ * <p>
+ * 原本 order/product 各有一份同构副本，现下沉到 common 共享同一个类。
  */
 public class OrderResultMsg {
 

@@ -47,6 +47,13 @@
             <artifactId>spring-boot-starter-amqp</artifactId>
         </dependency>
 
+        <!-- 公共模块：共享 RabbitMQ 拓扑/名称常量/JSON 转换器（自动配置装配）。 -->
+        <dependency>
+            <groupId>com.chuhezhe</groupId>
+            <artifactId>common</artifactId>
+            <version>1.0-SNAPSHOT</version>
+        </dependency>
+
         <dependency>
             <groupId>com.baomidou</groupId>
             <artifactId>mybatis-plus-spring-boot3-starter</artifactId>

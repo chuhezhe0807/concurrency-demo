@@ -28,8 +28,10 @@ WORKDIR /build
 #
 # 这是父 pom（多模块聚合），./ 表示拷到当前工作目录 /build 下。
 COPY pom.xml ./
-# 下面拷全部三个子模块的 pom：父 pom 里 <modules> 列了三个模块，
-# Maven 启动时会校验每个模块都存在，少一个就报错，所以三个 pom 都得拷进来。
+# 下面拷全部四个子模块的 pom：父 pom 里 <modules> 列了四个模块，
+# Maven 启动时会校验每个模块都存在，少一个就报错，所以四个 pom 都得拷进来。
+# 注意：gateway 不依赖 common，但 common 在聚合 <modules> 里，少了它的 pom 同样会校验失败，故也要拷。
+COPY common/pom.xml common/pom.xml
 COPY gateway-service/pom.xml gateway-service/pom.xml
 COPY product-service/pom.xml product-service/pom.xml
 COPY order-service/pom.xml order-service/pom.xml

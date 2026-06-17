@@ -1,7 +1,7 @@
 package com.chuhezhe.product.service;
 
-import com.chuhezhe.product.config.RabbitConfig;
-import com.chuhezhe.product.dto.StockDeductMsg;
+import com.chuhezhe.common.mq.MqConstants;
+import com.chuhezhe.common.dto.StockDeductMsg;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.LongString;
 import org.slf4j.Logger;
@@ -68,7 +68,7 @@ public class StockDeductDlqListener {
      * 监听死信队列，containerFactory 指向 {@code dlqContainerFactory}（独立线程池，
      * 与业务消费者隔离，互不干扰）。
      */
-    @RabbitListener(queues = RabbitConfig.STOCK_DEDUCT_DLQ,
+    @RabbitListener(queues = MqConstants.STOCK_DEDUCT_DLQ,
                     containerFactory = "dlqContainerFactory")
     public void onDeadLetter(StockDeductMsg msg, Message message, Channel channel) throws IOException {
         long tag = message.getMessageProperties().getDeliveryTag();
@@ -87,7 +87,7 @@ public class StockDeductDlqListener {
                   "  nack次数 : {}\n" +
                   "  消息体   : {}\n" +
                   "─────────────────────────────────────────────────────────────────",
-                RabbitConfig.STOCK_DEDUCT_DLQ,
+                MqConstants.STOCK_DEDUCT_DLQ,
                 orderNo,
                 deathInfo.reason(),
                 deathInfo.retryCount(),
@@ -96,7 +96,7 @@ public class StockDeductDlqListener {
         // 3. 发送邮件告警（内部有冷却去重，不会因同一消息多次消费而刷屏）
         alertEmailService.sendAlert(
                 orderNo,
-                RabbitConfig.STOCK_DEDUCT_DLQ,
+                MqConstants.STOCK_DEDUCT_DLQ,
                 deathInfo.reason(),
                 messageBody,
                 deathInfo.retryCount()

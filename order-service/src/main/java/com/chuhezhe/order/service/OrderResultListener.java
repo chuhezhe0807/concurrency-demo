@@ -1,7 +1,7 @@
 package com.chuhezhe.order.service;
 
-import com.chuhezhe.order.config.RabbitConfig;
-import com.chuhezhe.order.dto.OrderResultMsg;
+import com.chuhezhe.common.mq.MqConstants;
+import com.chuhezhe.common.dto.OrderResultMsg;
 import com.rabbitmq.client.Channel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,7 +29,7 @@ public class OrderResultListener {
         this.orderService = orderService;
     }
 
-    @RabbitListener(queues = RabbitConfig.ORDER_RESULT_QUEUE)
+    @RabbitListener(queues = MqConstants.ORDER_RESULT_QUEUE)
     public void onResult(OrderResultMsg result, Message message, Channel channel) throws IOException {
         long tag = message.getMessageProperties().getDeliveryTag();
         try {

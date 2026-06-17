@@ -2,9 +2,11 @@
 FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /build
 COPY pom.xml ./
+COPY common/pom.xml common/pom.xml
 COPY gateway-service/pom.xml gateway-service/pom.xml
 COPY product-service/pom.xml product-service/pom.xml
 COPY order-service/pom.xml order-service/pom.xml
+COPY common/src common/src
 COPY order-service/src order-service/src
 RUN --mount=type=cache,target=/root/.m2 \
     mvn -B -pl order-service -am clean package -DskipTests

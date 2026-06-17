@@ -1,7 +1,7 @@
 package com.chuhezhe.product.service;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import com.chuhezhe.product.dto.StockDeductMsg;
+import com.chuhezhe.common.dto.StockDeductMsg;
 import com.chuhezhe.product.entity.Product;
 import com.chuhezhe.product.entity.StockDeductLog;
 import com.chuhezhe.product.mapper.ProductMapper;

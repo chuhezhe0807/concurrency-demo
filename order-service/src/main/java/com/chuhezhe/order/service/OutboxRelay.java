@@ -1,8 +1,8 @@
 package com.chuhezhe.order.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.chuhezhe.order.config.RabbitConfig;
-import com.chuhezhe.order.dto.StockDeductMsg;
+import com.chuhezhe.common.mq.MqConstants;
+import com.chuhezhe.common.dto.StockDeductMsg;
 import com.chuhezhe.order.entity.OrderOutbox;
 import com.chuhezhe.order.mapper.OrderOutboxMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -93,10 +93,10 @@ public class OutboxRelay {
         // payload 存的是 JSON，先还原成对象再发，交给 Jackson2JsonMessageConverter 生成规范 JSON 消息，
         // 避免直接发字符串被二次转义；消费端按 StockDeductMsg 反序列化。
         StockDeductMsg msg = readMsg(outbox.getPayload());
-        rabbitTemplate.convertAndSend(RabbitConfig.SAGA_EXCHANGE, RabbitConfig.STOCK_DEDUCT_KEY,
+        rabbitTemplate.convertAndSend(MqConstants.SAGA_EXCHANGE, MqConstants.STOCK_DEDUCT_KEY,
                 msg, correlation);
         log.info("[OUTBOX] 已投递扣库存消息 orderNo={} -> {}/{}",
-                outbox.getOrderNo(), RabbitConfig.SAGA_EXCHANGE, RabbitConfig.STOCK_DEDUCT_KEY);
+                outbox.getOrderNo(), MqConstants.SAGA_EXCHANGE, MqConstants.STOCK_DEDUCT_KEY);
     }
 
     private StockDeductMsg readMsg(String json) {

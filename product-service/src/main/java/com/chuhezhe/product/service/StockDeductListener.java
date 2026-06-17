@@ -1,8 +1,8 @@
 package com.chuhezhe.product.service;
 
-import com.chuhezhe.product.config.RabbitConfig;
-import com.chuhezhe.product.dto.OrderResultMsg;
-import com.chuhezhe.product.dto.StockDeductMsg;
+import com.chuhezhe.common.mq.MqConstants;
+import com.chuhezhe.common.dto.OrderResultMsg;
+import com.chuhezhe.common.dto.StockDeductMsg;
 import com.rabbitmq.client.Channel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,7 +46,7 @@ public class StockDeductListener {
         this.rabbitTemplate = rabbitTemplate;
     }
 
-    @RabbitListener(queues = RabbitConfig.STOCK_DEDUCT_QUEUE)
+    @RabbitListener(queues = MqConstants.STOCK_DEDUCT_QUEUE)
     public void onStockDeduct(StockDeductMsg msg, Message message, Channel channel) throws IOException {
         long tag = message.getMessageProperties().getDeliveryTag();
         try {
@@ -57,7 +57,7 @@ public class StockDeductListener {
             }
             ProductService.DeductOutcome outcome = productService.deductForOrder(msg);
             OrderResultMsg result = new OrderResultMsg(msg.getOrderNo(), outcome.success(), outcome.reason());
-            rabbitTemplate.convertAndSend(RabbitConfig.SAGA_EXCHANGE, RabbitConfig.ORDER_RESULT_KEY, result);
+            rabbitTemplate.convertAndSend(MqConstants.SAGA_EXCHANGE, MqConstants.ORDER_RESULT_KEY, result);
             log.info("[STOCK-CONSUME] 已回传结果 orderNo={} success={}", msg.getOrderNo(), outcome.success());
             channel.basicAck(tag, false);
         } catch (Exception e) {
