@@ -103,10 +103,16 @@ public class ProductService {
         }
         boolean ok = deductStock(msg.getProductId(), msg.getQuantity());
         if (ok) {
+            // 同一事务内把占位行标记为「已扣」。供 DLQ 补偿区分「真扣了」与「库存不足没扣」。
+            StockDeductLog deducted = new StockDeductLog();
+            deducted.setOrderNo(msg.getOrderNo());
+            deducted.setDeducted(true);
+            deductLogMapper.updateById(deducted);
             log.info("[STOCK] 扣库存成功 orderNo={} productId={} qty={}",
                     msg.getOrderNo(), msg.getProductId(), msg.getQuantity());
             return new DeductOutcome(true, "ok");
         }
+        // 库存不足：占位行保持 deducted=false（其实没扣），照常提交避免无谓重试。
         log.warn("[STOCK] 库存不足，扣减失败 orderNo={} productId={} qty={}",
                 msg.getOrderNo(), msg.getProductId(), msg.getQuantity());
         return new DeductOutcome(false, "库存不足");

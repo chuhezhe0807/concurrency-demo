@@ -103,6 +103,7 @@ CREATE TABLE t_stock_deduct_log (
   order_no    VARCHAR(32)  NOT NULL PRIMARY KEY,
   product_id  BIGINT       NOT NULL,
   quantity    INT          NOT NULL,
+  deducted    TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '库存是否真的扣减成功:0=未扣(库存不足/尚未处理),1=已扣。DLQ 补偿据此判定回传成功/失败',
   create_time DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='扣库存幂等去重表';
 

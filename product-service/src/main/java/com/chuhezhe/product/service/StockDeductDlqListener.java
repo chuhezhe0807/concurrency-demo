@@ -1,13 +1,17 @@
 package com.chuhezhe.product.service;
 
 import com.chuhezhe.common.mq.MqConstants;
+import com.chuhezhe.common.dto.OrderResultMsg;
 import com.chuhezhe.common.dto.StockDeductMsg;
+import com.chuhezhe.product.entity.StockDeductLog;
+import com.chuhezhe.product.mapper.StockDeductLogMapper;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.LongString;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -18,12 +22,15 @@ import java.util.Map;
 /**
  * 扣库存死信队列监听器（US-023）。
  *
- * <p>消费 {@code stock.deduct.dlq} 中的死信消息，完成两件事：
+ * <p>消费 {@code stock.deduct.dlq} 中的死信消息，完成三件事：
  * <ol>
  *   <li><b>结构化日志</b>：打印 ERROR 级别日志，包含 orderNo、死信原因、x-death 元信息，
  *       便于 ELK/Loki 等日志平台的告警规则命中。</li>
  *   <li><b>邮件告警</b>：调用 {@link DlqAlertEmailService} 发送 HTML 告警邮件，
  *       通知值班人和研发负责人及时介入。</li>
+ *   <li><b>订单补偿</b>：查幂等表的 {@code deducted} 标志判定库存到底扣没扣，补发一条结果到
+ *       {@code order.result.queue}，让订单从「待确认」落到确认/取消的终态——否则技术异常进了 DLQ
+ *       后，order 收不到结果，订单会永久卡在 PENDING。</li>
  * </ol>
  *
  * <h3>x-death Headers 解析</h3>
@@ -59,9 +66,15 @@ public class StockDeductDlqListener {
     private static final Logger log = LoggerFactory.getLogger(StockDeductDlqListener.class);
 
     private final DlqAlertEmailService alertEmailService;
+    private final StockDeductLogMapper deductLogMapper;
+    private final RabbitTemplate rabbitTemplate;
 
-    public StockDeductDlqListener(DlqAlertEmailService alertEmailService) {
+    public StockDeductDlqListener(DlqAlertEmailService alertEmailService,
+                                  StockDeductLogMapper deductLogMapper,
+                                  RabbitTemplate rabbitTemplate) {
         this.alertEmailService = alertEmailService;
+        this.deductLogMapper = deductLogMapper;
+        this.rabbitTemplate = rabbitTemplate;
     }
 
     /**
@@ -102,13 +115,38 @@ public class StockDeductDlqListener {
                 deathInfo.retryCount()
         );
 
-        // 4. 无论告警是否成功，都 ack 消息（死信不再 requeue，避免无限循环）
+        // 4. 补偿：查幂等表判定库存「到底扣没扣」，补发结果让订单落终态，不再永久卡 PENDING。
+        //    deducted=true  → 库存确实扣了（一致）→ 补发成功 → 订单确认；
+        //    无记录/false    → 没扣（异常回滚 / 库存不足）→ 补发失败 → 订单取消（无需退库存）。
+        //    不能只看主键是否存在：库存不足时占位行也在，但其实没扣，故必须看 deducted 字段。
+        compensateOrder(msg.getOrderNo());
+
+        // 5. 无论告警/补偿是否成功，都 ack 消息（死信不再 requeue，避免无限循环）
         channel.basicAck(tag, false);
     }
 
     // ─────────────────────────────────────────────
     //  私有辅助方法
     // ─────────────────────────────────────────────
+
+    /**
+     * 死信补偿：按幂等表里的 {@code deducted} 标志补发一条扣库存结果到 {@code order.result.queue}，
+     * 让订单从「待确认」落到确认/取消的终态。order 侧 {@code applyDeductResult} 只推进待确认订单，
+     * 故重复补发是幂等安全的。
+     */
+    private void compensateOrder(String orderNo) {
+        if (orderNo == null) {
+            log.warn("[DLQ] 死信消息缺少 orderNo，无法补发结果，仅告警");
+            return;
+        }
+        StockDeductLog logRow = deductLogMapper.selectById(orderNo);
+        boolean deducted = logRow != null && Boolean.TRUE.equals(logRow.getDeducted());
+        String reason = deducted ? "DLQ补偿:库存已扣,确认订单" : "DLQ补偿:未扣库存,取消订单";
+        OrderResultMsg result = new OrderResultMsg(orderNo, deducted, reason);
+        rabbitTemplate.convertAndSend(MqConstants.SAGA_EXCHANGE, MqConstants.ORDER_RESULT_KEY, result);
+        log.warn("[DLQ] 已补发扣库存结果回 order orderNo={} deducted={} -> 订单将{}",
+                orderNo, deducted, deducted ? "确认" : "取消");
+    }
 
     /**
      * 从消息 body 字节数组中提取 UTF-8 字符串。
